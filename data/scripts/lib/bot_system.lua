@@ -4560,9 +4560,16 @@ function BotSystem.startStatueTraining(player, state, forceTrain)
 	state.trainStandPos = standPos
 	state.state = BOT_STATE.TRAINING
 
+	local bName = player:getName()
 	logger.info(string.format("[BotTraining] %s heading to training statue at (%d,%d,%d) [%s %d -> %d]",
-		player:getName(), statuePos.x, statuePos.y, statuePos.z,
+		bName, statuePos.x, statuePos.y, statuePos.z,
 		info.skillLabel, info.currentSkill, info.targetSkill))
+	pcall(function()
+		db.asyncQuery(string.format(
+			"REPLACE INTO `bot_macro_states` (`bot_name`, `current_action`, `target_destination`, `started_at`, `next_evaluation`, `reasoning`) VALUES (%s, 'TRAIN', 'Training Statue', NOW(), DATE_ADD(NOW(), INTERVAL 15 MINUTE), 'Statue Training')",
+			db.escapeString(bName)
+		))
+	end)
 	return true
 end
 
@@ -4746,7 +4753,6 @@ function BotSystem.hardResetAllBots(initiatorPlayer)
 	_lastSpeakerBroadcastHandled = {}
 
 	-- 3. Wipe DB persistence, reservations, items, and reset players table to fresh Level 8
-	pcall(function() db.query("DELETE FROM `bot_hunt_reservations`") end)
 	pcall(function() db.query("DELETE FROM `bot_state_persistence`") end)
 	pcall(function() db.query("UPDATE `bot_startup_config` SET `config_value` = '0' WHERE `config_key` = 'should_restore_states'") end)
 	pcall(function() db.query("DELETE FROM `bot_macro_states`") end)
@@ -6751,6 +6757,19 @@ function BotSystem.equipBot(player)
 		pcall(function() player:setSlotItem(CONST_SLOT_BACKPACK, 2854, 1) end)
 	end
 
+	-- Ensure bot always carries essential exploration tools: machete (3308), rope (3003), shovel (3457)
+	pcall(function()
+		if not player:getItemCount(3308) or player:getItemCount(3308) == 0 then
+			player:addItem(3308, 1, false)
+		end
+		if not player:getItemCount(3003) or player:getItemCount(3003) == 0 then
+			player:addItem(3003, 1, false)
+		end
+		if not player:getItemCount(3457) or player:getItemCount(3457) == 0 then
+			player:addItem(3457, 1, false)
+		end
+	end)
+
 	local guid = player:getGuid()
 	local state = BotState and BotState[guid]
 	local personality = state and state.personality or ((guid % 5) + 1)
@@ -7665,6 +7684,43 @@ function BotSystem.advanceHuntWaypoint(player, state)
 	return false
 end
 
+-- Cut jungle grass, wild growth, reeds or spider webs using machete
+function BotSystem.tryCutMacheteObstacle(player, targetPos)
+	local tile = Tile(targetPos)
+	if not tile then return false end
+	local items = tile:getItems()
+	if not items then return false end
+
+	for _, item in ipairs(items) do
+		local id = item:getId()
+		-- Jungle grass (3696, 3702, 17153)
+		if id == 3696 or id == 3702 or id == 17153 then
+			item:transform(id == 17153 and 17151 or id - 1)
+			item:decay()
+			targetPos:sendMagicEffect(CONST_ME_POFF)
+			return true
+		-- Wild growth (2130, 3635, 30224)
+		elseif id == 2130 or id == 3635 or id == 30224 then
+			targetPos:sendMagicEffect(CONST_ME_POFF)
+			item:remove()
+			return true
+		-- Swamp reeds (30623 -> 30624)
+		elseif id == 30623 then
+			item:transform(30624)
+			item:decay()
+			targetPos:sendMagicEffect(CONST_ME_POFF)
+			return true
+		-- Spider webs / cobwebs (3798, 3799, 3800)
+		elseif id == 3798 or id == 3799 or id == 3800 then
+			item:transform(id == 3800 and 3801 or id + 1)
+			item:decay()
+			targetPos:sendMagicEffect(CONST_ME_POFF)
+			return true
+		end
+	end
+	return false
+end
+
 -- Handle special waypoint actions (door, hole, shovel, rope, ladder, etc.)
 function BotSystem.handleHuntWaypointAction(player, state, wp)
 	local wtype = wp.waypoint_type
@@ -7694,6 +7750,16 @@ function BotSystem.handleHuntWaypointAction(player, state, wp)
 			player:teleportTo(destPos, true)
 			BotSystem.castDebug(player, state, "ACTION: ascended " .. wtype .. " at ("
 				.. wp.pos_x .. "," .. wp.pos_y .. "," .. wp.pos_z .. ") -> z=" .. destPos.z)
+		end
+	elseif wtype == "machete" then
+		local mPos = Position(wp.pos_x, wp.pos_y, wp.pos_z)
+		BotSystem.tryCutMacheteObstacle(player, mPos)
+		for ox = -1, 1 do
+			for oy = -1, 1 do
+				if ox ~= 0 or oy ~= 0 then
+					BotSystem.tryCutMacheteObstacle(player, Position(wp.pos_x + ox, wp.pos_y + oy, wp.pos_z))
+				end
+			end
 		end
 	end
 
@@ -7894,6 +7960,12 @@ function BotSystem.clearPathBlocker(player, state, targetPos)
 	for _, checkPos in ipairs(checkList) do
 		local tile = Tile(checkPos)
 		if tile then
+			-- Check if this tile contains a cuttable machete obstacle (jungle grass, wild growth, reeds, webs)
+			if BotSystem.tryCutMacheteObstacle(player, checkPos) then
+				BotSystem.castDebug(player, state, "ACTION: cut obstacle with machete at (" .. checkPos.x .. "," .. checkPos.y .. "," .. checkPos.z .. ")")
+				return true
+			end
+
 			local creature = tile:getTopCreature()
 			if creature and creature:isMonster() and creature:getHealth() > 0 then
 				local cid = creature:getId()
@@ -8604,6 +8676,28 @@ function BotSystem.findClosestForwardWaypoint(player, state)
 				bestDist = d
 				bestIdx = i
 			end
+		end
+	end
+
+	-- If bot was pulled far away (> 15 tiles) by combat or a previous skip,
+	-- recover the closest reachable waypoint on our current z-level (within 15 sqm).
+	if bestDist > 15 then
+		local nearestIdx = nil
+		local nearestDist = 9999
+		for i = 1, #wps do
+			local wp = wps[i]
+			if wp and wp.pos_x and wp.pos_x > 0 and wp.pos_z == pos.z then
+				local d = math.max(math.abs(pos.x - wp.pos_x), math.abs(pos.y - wp.pos_y))
+				if d < nearestDist and d <= 15 then
+					nearestDist = d
+					nearestIdx = i
+				end
+			end
+		end
+		if nearestIdx then
+			BotSystem.castDebug(player, state, "RESUME: stranded at dist=" .. bestDist .. ", recovered closest wp " .. nearestIdx .. " at dist=" .. nearestDist)
+			state.huntWaypointIdx = nearestIdx
+			return
 		end
 	end
 

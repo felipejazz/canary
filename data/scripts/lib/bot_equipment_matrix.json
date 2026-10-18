@@ -174,9 +174,9 @@
           "rank": 3
         },
         {
-          "id": 3059,
-          "name": "spellbook",
-          "price": 489,
+          "id": 3425,
+          "name": "dwarven shield",
+          "price": 100,
           "tag": "offensive",
           "rank": 4
         }
@@ -356,9 +356,9 @@
           "rank": 3
         },
         {
-          "id": 3059,
-          "name": "spellbook",
-          "price": 489,
+          "id": 3425,
+          "name": "dwarven shield",
+          "price": 100,
           "tag": "offensive",
           "rank": 4
         }

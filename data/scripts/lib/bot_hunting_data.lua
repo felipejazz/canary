@@ -616,9 +616,19 @@ function BotHuntData.reserveHunt(scriptId, botId)
 
 	local p = Player(botId)
 	if p and script then
+		local bName = p:getName()
+		local huntName = script.name or "Hunt"
 		logger.info(string.format("[HuntAssign] %s (lv%d voc%d) -> '%s' (id=%d town=%s) spawn=%s [occupants=%d/2]",
-			p:getName(), p:getLevel(), p:getVocation():getId(),
-			script.name or "?", scriptId, script.town_name or "?", spawnKey, sCount + 1))
+			bName, p:getLevel(), p:getVocation():getId(),
+			huntName, scriptId, script.town_name or "?", spawnKey, sCount + 1))
+
+		-- Sync real hunt name to bot_macro_states so dashboard and web UI display it
+		pcall(function()
+			db.asyncQuery(string.format(
+				"REPLACE INTO `bot_macro_states` (`bot_name`, `current_action`, `target_destination`, `started_at`, `next_evaluation`, `reasoning`) VALUES (%s, 'HUNT', %s, NOW(), DATE_ADD(NOW(), INTERVAL 15 MINUTE), 'Assigned Cavebot Hunt')",
+				db.escapeString(bName), db.escapeString(huntName)
+			))
+		end)
 	end
 
 	return true
