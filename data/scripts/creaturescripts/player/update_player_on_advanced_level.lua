@@ -37,6 +37,10 @@ function updatePlayerOnAdvancedLevel.onAdvance(player, skill, oldLevel, newLevel
 		return true
 	end
 
+	if player:isBotPlayer() and BotSystem and BotSystem.onBotAdvance then
+		pcall(function() BotSystem.onBotAdvance(player, skill, oldLevel, newLevel) end)
+	end
+
 	player:addHealth(player:getMaxHealth())
 	player:addMana(player:getMaxMana())
 	player:getFinalLowLevelBonus()

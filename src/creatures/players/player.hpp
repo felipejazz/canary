@@ -1040,6 +1040,7 @@ public:
 	void onCreatureAppear(const std::shared_ptr<Creature> &creature, bool isLogin) override;
 	void onRemoveCreature(const std::shared_ptr<Creature> &creature, bool isLogout) override;
 	void onCreatureMove(const std::shared_ptr<Creature> &creature, const std::shared_ptr<Tile> &newTile, const Position &newPos, const std::shared_ptr<Tile> &oldTile, const Position &oldPos, bool teleport) override;
+	void onCreatureSay(const std::shared_ptr<Creature> &creature, SpeakClasses type, const std::string &text) override;
 
 	void onEquipInventory();
 	void onDeEquipInventory();
@@ -1315,6 +1316,13 @@ public:
 	uint8_t getAccountType() const;
 	uint32_t getAccountId() const;
 	std::shared_ptr<Account> getAccount() const;
+
+	bool isBot() const {
+		return m_isBot || (getAccountId() >= 77 && getAccountId() <= 151) || getAccountId() == 65000 || getName().starts_with("Bot ");
+	}
+	void setBot(bool value) {
+		m_isBot = value;
+	}
 
 	// Prey system
 	void initializePrey();
@@ -1974,6 +1982,7 @@ private:
 
 	std::shared_ptr<Account> account;
 	bool online = true;
+	bool m_isBot = false;
 
 	bool hasQuiverEquipped() const;
 

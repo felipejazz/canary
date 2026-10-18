@@ -1701,6 +1701,14 @@
         "source": "src/lua/functions/core/game/game_functions.cpp"
       },
       {
+        "name": "loadBotPlayer",
+        "params": [
+          "name: string"
+        ],
+        "return": "nil|Player",
+        "source": "src/lua/functions/core/game/game_functions.cpp"
+      },
+      {
         "name": "loadMap",
         "params": [
           "path: string"

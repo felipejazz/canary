@@ -112,7 +112,7 @@ do
 			func(self, value)
 			self:type(key)
 		else
-			reportError("Invalid EventCallback with name: {}", tostring(key))
+			logger.warn(string.format("Ignorando EventCallback não suportado: %s", tostring(key)))
 		end
 	end
 	rawgetmetatable("EventCallback").__newindex = EventCallbackNewIndex

@@ -926,6 +926,10 @@ function Game.hasDistanceEffect(effectId) end
 ---@return boolean
 function Game.hasEffect(effectId) end
 
+---@param name string
+---@return nil|Player
+function Game.loadBotPlayer(name) end
+
 ---@param path string
 ---@return nil
 function Game.loadMap(path) end

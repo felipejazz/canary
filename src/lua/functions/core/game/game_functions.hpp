@@ -62,6 +62,7 @@ private:
 	static int luaGameGetClientVersion(lua_State* L);
 
 	static int luaGameReload(lua_State* L);
+	static int luaGameLoadBotPlayer(lua_State* L);
 
 	static int luaGameGetOfflinePlayer(lua_State* L);
 	static int luaGameGetNormalizedPlayerName(lua_State* L);

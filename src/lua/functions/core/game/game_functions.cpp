@@ -19,6 +19,7 @@
 #include "game/scheduling/dispatcher.hpp"
 #include "io/io_bosstiary.hpp"
 #include "io/iobestiary.hpp"
+#include "io/iologindata.hpp"
 #include "items/item.hpp"
 #include "lua/callbacks/events_callbacks.hpp"
 #include "lua/creature/events.hpp"
@@ -80,6 +81,7 @@ void GameFunctions::init(lua_State* L) {
 	Lua::registerMethod(L, "Game", "getClientVersion", GameFunctions::luaGameGetClientVersion);
 
 	Lua::registerMethod(L, "Game", "reload", GameFunctions::luaGameReload);
+	Lua::registerMethod(L, "Game", "loadBotPlayer", GameFunctions::luaGameLoadBotPlayer);
 
 	Lua::registerMethod(L, "Game", "hasDistanceEffect", GameFunctions::luaGameHasDistanceEffect);
 	Lua::registerMethod(L, "Game", "hasEffect", GameFunctions::luaGameHasEffect);
@@ -834,6 +836,60 @@ int GameFunctions::luaGameGetOfflinePlayer(lua_State* L) {
 		Lua::setMetatable(L, -1, "Player");
 	}
 
+	return 1;
+}
+
+int GameFunctions::luaGameLoadBotPlayer(lua_State* L) {
+	// Game.loadBotPlayer(name) — loads a player from DB, places in world with no client
+	const std::string name = Lua::getString(L, 1);
+
+	// If already online, return existing
+	auto existing = g_game().getPlayerByName(name);
+	if (existing) {
+		Lua::pushUserdata<Player>(L, existing);
+		Lua::setMetatable(L, -1, "Player");
+		return 1;
+	}
+
+	// Create player with no client connection
+	auto player = std::make_shared<Player>(nullptr);
+	player->setName(name);
+	if (!IOLoginData::loadPlayerByName(player, name, false)) {
+		lua_pushnil(L);
+		return 1;
+	}
+	player->setID();
+	player->setBot(true);
+
+	player->setOnline(true);
+	if (player->getVocation()) {
+		player->setBaseSpeed(player->getVocation()->getBaseSpeed() + (2 * (player->getLevel() - 1)));
+	}
+
+	auto loginPos = player->getLoginPosition();
+	bool placed = false;
+	if (loginPos.x > 0 && loginPos.y > 0) {
+		placed = g_game().placeCreature(player, loginPos, false, true);
+	}
+	if (!placed) {
+		const auto &town = player->getTown();
+		if (town) {
+			placed = g_game().placeCreature(player, town->getTemplePosition(), false, true);
+		}
+	}
+	if (!placed) {
+		player->setOnline(false);
+		lua_pushnil(L);
+		return 1;
+	}
+
+	g_game().addCreatureCheck(player);
+	g_game().addPlayer(player);
+	player->setChaseMode(true);
+	player->setSecureMode(true);
+
+	Lua::pushUserdata<Player>(L, player);
+	Lua::setMetatable(L, -1, "Player");
 	return 1;
 }
 

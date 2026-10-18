@@ -75,7 +75,7 @@ function getLootRandom(modifier)
 	return randomValue * 100 / multi
 end
 
-if configManager.getBoolean(configKeys.LUA_SCRIPT_DEBUG_HOOK) then
+if configKeys.LUA_SCRIPT_DEBUG_HOOK and configManager.getBoolean(configKeys.LUA_SCRIPT_DEBUG_HOOK) then
 	local instructionInterval = math.max(1000, configManager.getNumber(configKeys.LUA_SCRIPT_DEBUG_HOOK_INTERVAL))
 	local callStarts = {}
 

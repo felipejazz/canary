@@ -1,4 +1,4 @@
-local monkQuestTotalShrines = math.max(1, configManager.getNumber(configKeys.MONK_QUEST_TOTAL_SHRINES))
+local monkQuestTotalShrines = math.max(1, 4)
 
 local quest = {
 	name = "The Way of the Monk",

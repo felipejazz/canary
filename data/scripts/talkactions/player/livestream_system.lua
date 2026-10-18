@@ -1,4 +1,4 @@
-local experienceMultiplier = configManager.getFloat(configKeys.LIVESTREAM_EXPERIENCE_MULTIPLIER)
+local experienceMultiplier = (configKeys.LIVESTREAM_EXPERIENCE_MULTIPLIER and configManager.getFloat(configKeys.LIVESTREAM_EXPERIENCE_MULTIPLIER)) or 1.0
 local bonusPercent = math.floor(((experienceMultiplier or 1.0) - 1.0) * 100 + 0.5)
 
 local playersStreaming = {}

@@ -80,6 +80,19 @@ local function saveDeathRecord(playerGuid, player, killerName, byPlayer, mostDam
 	-- that read can run before the INSERT lands, so a player's first-ever
 	-- death could read 0 records and skip the guild-war kill/score update.
 	db.query(query)
+
+	-- Registra evento real na telemetria de mortes (bot_death_events)
+	local pos = player:getPosition()
+	local botDeathQuery = string.format(
+		"INSERT INTO `bot_death_events` (`victim_name`, `victim_level`, `killer_name`, `is_pvp`, `location_x`, `location_y`, `location_z`, `blessing_protected`, `timestamp`) VALUES (%s, %d, %s, %d, %d, %d, %d, %d, NOW())",
+		db.escapeString(player:getName()),
+		player:getLevel(),
+		db.escapeString(killerName),
+		byPlayer,
+		pos.x, pos.y, pos.z,
+		player:hasBlessing(1) and 1 or 0
+	)
+	db.asyncQuery(botDeathQuery)
 end
 
 local function hasDeathRecord(playerGuid)

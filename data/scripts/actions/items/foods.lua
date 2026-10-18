@@ -148,10 +148,14 @@ function food.onUse(player, item, fromPosition, target, toPosition, isHotkey)
 		return true
 	end
 
-	player:updateFood(item:getId(), itemFood[1] * 12)
+	if player.updateFood then
+		player:updateFood(item:getId(), itemFood[1] * 12)
+	end
 	player:feed(itemFood[1] * 12)
 	player:say(itemFood[2], TALKTYPE_MONSTER_SAY)
-	player:updateSupplyTracker(item)
+	if player.updateSupplyTracker then
+		player:updateSupplyTracker(item)
+	end
 	player:getPosition():sendSingleSoundEffect(SOUND_EFFECT_TYPE_ACTION_EAT, player:isInGhostMode() and nil or player)
 	item:remove(1)
 	return true

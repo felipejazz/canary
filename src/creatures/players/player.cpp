@@ -62,6 +62,8 @@
 #include "lua/creature/creatureevent.hpp"
 #include "lua/creature/events.hpp"
 #include "lua/creature/movement.hpp"
+#include "lua/scripts/lua_environment.hpp"
+#include "lua/scripts/luascript.hpp"
 #include "map/spectators.hpp"
 #include "creatures/players/vocations/vocation.hpp"
 #include "creatures/players/components/wheel/wheel_definitions.hpp"
@@ -2306,6 +2308,10 @@ void Player::removeMagicEffect(const Position &pos, uint16_t type) const {
 }
 
 void Player::sendPing() {
+	if (isBot()) {
+		return;
+	}
+
 	const int64_t timeNow = OTSYS_TIME();
 
 	bool hasLostConnection = false;
@@ -8635,7 +8641,7 @@ void Player::onThink(uint32_t interval) {
 	const auto &playerTile = getTile();
 	const bool vipStaysOnline = isVip() && g_configManager().getBoolean(VIP_STAY_ONLINE);
 	idleTime += interval;
-	if (playerTile && !playerTile->hasFlag(TILESTATE_NOLOGOUT) && !isAccessPlayer() && !isExerciseTraining() && !vipStaysOnline) {
+	if (!isBot() && playerTile && !playerTile->hasFlag(TILESTATE_NOLOGOUT) && !isAccessPlayer() && !isExerciseTraining() && !vipStaysOnline) {
 		const int32_t kickAfterMinutes = g_configManager().getNumber(KICK_AFTER_MINUTES);
 		if (idleTime > (kickAfterMinutes * 60000) + 60000) {
 			removePlayer(true);
@@ -12357,6 +12363,52 @@ void Player::onRemoveCreature(const std::shared_ptr<Creature> &creature, bool is
 		setShopOwner(nullptr);
 		sendCloseShop();
 	}
+}
+
+void Player::onCreatureSay(const std::shared_ptr<Creature> &creature, SpeakClasses type, const std::string &text) {
+	Creature::onCreatureSay(creature, type, text);
+	if (!isBot() || !creature || creature.get() == this || text.empty()) {
+		return;
+	}
+
+	const auto &speaker = creature->getPlayer();
+	if (!speaker || speaker->isBot()) {
+		return;
+	}
+
+	lua_State* L = g_luaEnvironment().getLuaState();
+	if (!L) {
+		return;
+	}
+
+	if (!LuaScriptInterface::reserveScriptEnv()) {
+		g_logger().error("[Player::onCreatureSay] Call stack overflow.");
+		return;
+	}
+
+	ScriptEnvironment* env = LuaScriptInterface::getScriptEnv();
+	env->setScriptId(EVENT_ID_USER, &g_luaEnvironment());
+
+	lua_getglobal(L, "BotSystem");
+	if (lua_istable(L, -1)) {
+		lua_getfield(L, -1, "onBotHear");
+		if (lua_isfunction(L, -1)) {
+			Lua::pushUserdata<Player>(L, static_self_cast<Player>());
+			Lua::setMetatable(L, -1, "Player");
+			Lua::pushUserdata<Player>(L, speaker);
+			Lua::setMetatable(L, -1, "Player");
+			lua_pushnumber(L, static_cast<lua_Number>(type));
+			lua_pushstring(L, text.c_str());
+			if (lua_pcall(L, 4, 0, 0) != 0) {
+				g_logger().error("[Player::onCreatureSay] Lua error in BotSystem.onBotHear: {}", lua_tostring(L, -1));
+				lua_pop(L, 1);
+			}
+		} else {
+			lua_pop(L, 1);
+		}
+	}
+	lua_pop(L, 1);
+	LuaScriptInterface::resetScriptEnv();
 }
 
 void Player::onCreatureMove(const std::shared_ptr<Creature> &creature, const std::shared_ptr<Tile> &newTile, const Position &newPos, const std::shared_ptr<Tile> &oldTile, const Position &oldPos, bool teleport) {

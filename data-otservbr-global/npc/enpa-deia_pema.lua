@@ -57,7 +57,7 @@ npcType.onCheckItem = function(npc, player, clientId, subType) end
 
 local keywordHandler = KeywordHandler:new()
 local npcHandler = NpcHandler:new(keywordHandler)
-local monkQuestTotalShrines = math.max(1, configManager.getNumber(configKeys.MONK_QUEST_TOTAL_SHRINES))
+local monkQuestTotalShrines = math.max(1, 4)
 
 npcType.onThink = function(npc, interval)
 	npcHandler:onThink(npc, interval)
