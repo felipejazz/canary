@@ -116,6 +116,48 @@ function BotEquipmentData.getLoadout(level, baseVoc, personality)
 	local feetOpt  = BotEquipmentData.getOptionForSlot(bracket, vocStr, "feet", personality)
 	local rightOpt = BotEquipmentData.getOptionForSlot(bracket, vocStr, "right", personality)
 	local leftOpt  = BotEquipmentData.getOptionForSlot(bracket, vocStr, "left", personality)
+	local ammoOpt  = 0
+
+	-- Paladin Archetype Kits
+	if baseVoc == 3 then
+		local isArcher = (personality == 2 or personality == 4) -- 2: Arrojado/Rusher, 4: Gladiador
+		if isArcher then
+			-- Archer: Bow/Crossbow + Quiver (required for distance shooting in Canary)
+			if bracket >= 100 then
+				rightOpt = { item_id = 8854 }   -- Warsinger Bow
+				leftOpt  = { item_id = 35848 }  -- Blue Quiver
+				ammoOpt  = 15793                -- Crystalline Arrow
+			elseif bracket >= 50 then
+				rightOpt = { item_id = 8027 }   -- Composite Hornbow
+				leftOpt  = { item_id = 35848 }  -- Blue Quiver
+				ammoOpt  = 7365                 -- Onyx Arrow
+			elseif bracket >= 20 then
+				rightOpt = { item_id = 3350 }   -- Bow
+				leftOpt  = { item_id = 35562 }  -- Quiver
+				ammoOpt  = 7364                 -- Sniper Arrow
+			else
+				rightOpt = { item_id = 3350 }   -- Bow
+				leftOpt  = { item_id = 35562 }  -- Quiver
+				ammoOpt  = 3447                 -- Arrow
+			end
+		else
+			-- Spearman: Throwing weapon + Shield
+			ammoOpt = 0
+			if bracket >= 100 then
+				rightOpt = { item_id = 7368 }   -- Assassin Star
+				leftOpt  = { item_id = 3414 }   -- Mastermind Shield
+			elseif bracket >= 50 then
+				rightOpt = { item_id = 7378 }   -- Royal Spear
+				leftOpt  = { item_id = 3420 }   -- Demon Shield
+			elseif bracket >= 20 then
+				rightOpt = { item_id = (level >= 25 and 7378 or 14251) } -- Royal Spear (25+) / Hunting Spear
+				leftOpt  = { item_id = 3415 }   -- Guardian Shield
+			else
+				rightOpt = { item_id = 3277 }   -- Spear
+				leftOpt  = { item_id = 3425 }   -- Dwarven Shield
+			end
+		end
+	end
 
 	return {
 		slot_head  = headOpt and headOpt.item_id or 3351,
@@ -123,7 +165,8 @@ function BotEquipmentData.getLoadout(level, baseVoc, personality)
 		slot_legs  = legsOpt and legsOpt.item_id or 3557,
 		slot_feet  = feetOpt and feetOpt.item_id or 3552,
 		slot_right = rightOpt and rightOpt.item_id or 7773,
-		slot_left  = leftOpt and leftOpt.item_id or 3425
+		slot_left  = leftOpt and leftOpt.item_id or 3425,
+		slot_ammo  = ammoOpt or 0
 	}
 end
 

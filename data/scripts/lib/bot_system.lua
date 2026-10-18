@@ -136,9 +136,13 @@ local function implSetSlotItem(self, slot, itemId, count)
 	if not item then return false end
 	local flags = rawget(_G, "FLAG_NOLIMIT") or 1
 	local ok, ret = pcall(function() return self:addItemEx(item, false, slot, flags) end)
-	if not ok then return false end
 	local noError = rawget(_G, "RETURNVALUE_NOERROR") or 0
-	return ret == noError or ret == true or ret == 0
+	if not ok or (ret ~= noError and ret ~= true and ret ~= 0) then
+		-- Cleanly discard created item; NEVER drop to floor
+		pcall(function() item:remove() end)
+		return false
+	end
+	return true
 end
 
 local function implCastSpell(self, spellName, target)
@@ -1882,6 +1886,9 @@ function BotSystem.executeReload(opts)
 	-- Monolithic binary support: when dynamic .so engine (Game.botReload) is not present,
 	-- delegate reload directly to the native Lua population manager.
 	if not Game.botReload then
+		if BotHuntData and BotHuntData.loadAll then
+			pcall(BotHuntData.loadAll)
+		end
 		local count = opts.debugCount
 		if count == "off" then
 			count = BOT_CONFIG.TARGET_ONLINE or 80
@@ -4955,6 +4962,13 @@ function BotSystem.thinkEvent(guid)
 			end
 		end
 
+		-- Periodic upkeep: Paladin ammo maintenance & Mage mushroom/food regeneration
+		if not state.lastUpkeepCheck or (now - state.lastUpkeepCheck) >= 2 then
+			state.lastUpkeepCheck = now
+			BotSystem.checkPaladinAmmo(player, state)
+			BotSystem.checkMageFoodAndRegen(player, state)
+		end
+
 		-- Execucao da Inteligencia Artificial nativa por estado
 		if state.state == BOT_STATE.IDLE then
 			BotSystem.doIdle(player, state)
@@ -6723,26 +6737,34 @@ function BotSystem.learnAllSpells(player)
 	logger.info("[Bot] " .. player:getName() .. " learned " .. count .. " spells (voc=" .. baseVoc .. ")")
 end
 
--- Throwing weapon item IDs that need stacking (paladin ammo)
+-- Throwing weapon & ammunition item IDs that need stacking (paladin ammo/weapons)
 local THROWING_WEAPON_IDS = {
+	[3277] = true,   -- spear
 	[3287] = true,   -- throwing star
 	[3298] = true,   -- throwing knife
 	[3302] = true,   -- snowball
+	[3446] = true,   -- bolt
+	[3447] = true,   -- arrow
+	[7363] = true,   -- piercing bolt
+	[7364] = true,   -- sniper arrow
+	[7365] = true,   -- onyx arrow
 	[7367] = true,   -- enchanted spear
 	[7368] = true,   -- assassin star
 	[7378] = true,   -- royal spear
 	[11230] = true,  -- viper star
+	[14251] = true,  -- hunting spear
+	[15792] = true,  -- prismatic bolt
+	[15793] = true,  -- crystalline arrow
 	[25757] = true,  -- prismatic bolt
 	[25759] = true,  -- royal star
-	[14251] = true,  -- hunting spear
 }
-local THROWING_WEAPON_COUNT = 100  -- Stack count (ammo never consumed for bots via C++ skip)
+local THROWING_WEAPON_COUNT = 100  -- Stack count
 
 local FALLBACK_STARTER_LOADOUTS = {
-	[1] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 3074, slot_left = 3425 }, -- Sorcerer: Wand of Vortex + Plate Set + Dwarven Shield
-	[2] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 3066, slot_left = 3425 }, -- Druid: Snakebite Rod + Plate Set + Dwarven Shield
-	[3] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 7378, slot_left = 3425 }, -- Paladin: Royal Spear + Plate Set + Dwarven Shield
-	[4] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 3271, slot_left = 3425 }, -- Knight: Spike Sword + Plate Set + Dwarven Shield
+	[1] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 3074, slot_left = 3425, slot_ammo = 0 }, -- Sorcerer: Wand of Vortex + Plate Set + Dwarven Shield
+	[2] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 3066, slot_left = 3425, slot_ammo = 0 }, -- Druid: Snakebite Rod + Plate Set + Dwarven Shield
+	[3] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 3277, slot_left = 3425, slot_ammo = 0 }, -- Paladin: Spear + Plate Set + Dwarven Shield
+	[4] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 3271, slot_left = 3425, slot_ammo = 0 }, -- Knight: Spike Sword + Plate Set + Dwarven Shield
 }
 
 -- Equip bot with best gear for their level and vocation.
@@ -6789,7 +6811,16 @@ function BotSystem.equipBot(player)
 		{field = "slot_feet",  slot = CONST_SLOT_FEET,  name = "feet"},
 		{field = "slot_right", slot = CONST_SLOT_LEFT,  name = "weapon"},  -- DB slot_right = weapon -> left hand
 		{field = "slot_left",  slot = CONST_SLOT_RIGHT, name = "shield"},  -- DB slot_left = shield -> right hand
+		{field = "slot_ammo",  slot = CONST_SLOT_AMMO,  name = "ammo"},
 	}
+
+	-- If loadout specifies no shield (e.g. 2-handed bow), unequip any existing shield
+	if not loadout.slot_left or loadout.slot_left == 0 then
+		local currentShield = player:getSlotItem(CONST_SLOT_RIGHT)
+		if currentShield then
+			currentShield:remove()
+		end
+	end
 
 	local equipped = 0
 	local updated = 0
@@ -6804,7 +6835,7 @@ function BotSystem.equipBot(player)
 				equipped = equipped + 1
 			else
 				-- Need to equip or replace
-				local count = THROWING_WEAPON_IDS[itemId] and THROWING_WEAPON_COUNT or 1
+				local count = (s.slot == CONST_SLOT_AMMO or THROWING_WEAPON_IDS[itemId]) and THROWING_WEAPON_COUNT or 1
 				local ok = player:setSlotItem(s.slot, itemId, count)
 				if ok then
 					equipped = equipped + 1
@@ -6821,8 +6852,129 @@ function BotSystem.equipBot(player)
 			.. " (lv=" .. level .. " voc=" .. baseVoc .. ")")
 	end
 	if updated > 0 then
-		logger.info("[Bot] " .. player:getName() .. " equipped " .. equipped .. "/6 items, " .. updated .. " updated"
+		logger.info("[Bot] " .. player:getName() .. " equipped " .. equipped .. "/" .. #slotMap .. " items, " .. updated .. " updated"
 			.. " (lv=" .. level .. " voc=" .. baseVoc .. ")")
+	end
+
+	-- Run immediate upkeep for ammo / mushrooms
+	if state then
+		BotSystem.checkPaladinAmmo(player, state)
+		BotSystem.checkMageFoodAndRegen(player, state)
+	end
+end
+
+-- Paladin ammunition management: only refills when completely OUT OF AMMO (count == 0).
+-- Archer paladins use Quivers; spears go directly into weapon hand.
+function BotSystem.checkPaladinAmmo(player, state)
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	if baseVoc ~= 3 then return end
+
+	local level = player:getLevel()
+	local guid = player:getGuid()
+	local personality = state and state.personality or ((guid % 5) + 1)
+	local isArcher = (personality == 2 or personality == 4)
+
+	if isArcher then
+		local ammoId = 3447 -- Arrow
+		if level >= 100 then
+			ammoId = 15793 -- Crystalline Arrow
+		elseif level >= 50 then
+			ammoId = 7365  -- Onyx Arrow
+		elseif level >= 20 then
+			ammoId = 7364  -- Sniper Arrow
+		end
+
+		local quiver = player:getSlotItem(CONST_SLOT_RIGHT)
+		local countInQuiver = 0
+		if quiver and quiver:isContainer() then
+			countInQuiver = quiver:getItemCountById(ammoId)
+		end
+		local totalCount = player:getItemCount(ammoId) or 0
+
+		-- Only spawn free ammo when completely OUT OF AMMO (totalCount == 0) for low-level (level <= 25)
+		if level <= 25 and totalCount == 0 then
+			pcall(function() player:setCapacity(math.max(player:getCapacity(), 20000)) end)
+			if quiver and quiver:isContainer() then
+				quiver:addItem(ammoId, 100)
+			else
+				player:addItem(ammoId, 100)
+			end
+			logger.info("[Bot:" .. player:getName() .. "] Ammo empty (0)! Spawned free 100x arrows (id=" .. ammoId .. ")")
+		elseif quiver and quiver:isContainer() and countInQuiver == 0 and totalCount > 0 then
+			-- Quiver empty but bot has arrows in backpack: move into quiver
+			local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+			if bp and bp:isContainer() then
+				for i = 0, bp:getSize() - 1 do
+					local it = bp:getItem(i)
+					if it and it:getId() == ammoId then
+						it:moveTo(quiver)
+						break
+					end
+				end
+			end
+		end
+	else
+		local spearId = 3277 -- Spear
+		if level >= 100 then
+			spearId = 7368  -- Assassin Star
+		elseif level >= 25 then
+			spearId = 7378  -- Royal Spear
+		elseif level >= 20 then
+			spearId = 14251 -- Hunting Spear
+		end
+
+		local currentWeapon = player:getSlotItem(CONST_SLOT_LEFT)
+		local equippedCount = (currentWeapon and currentWeapon:getId() == spearId) and currentWeapon:getCount() or 0
+		local totalCount = player:getItemCount(spearId) or 0
+
+		-- Only spawn free spears when completely OUT OF WEAPONS (totalCount == 0) for low-level (level <= 25)
+		if level <= 25 and totalCount == 0 then
+			pcall(function() player:setCapacity(math.max(player:getCapacity(), 50000)) end)
+			local ok = player:setSlotItem(CONST_SLOT_LEFT, spearId, 10)
+			if not ok then
+				player:addItem(spearId, 10)
+			end
+			logger.info("[Bot:" .. player:getName() .. "] Spears empty (0)! Spawned free 10x spears (id=" .. spearId .. ")")
+		elseif equippedCount == 0 and totalCount > 0 then
+			-- Weapon hand empty but bot has spears in backpack: equip to weapon hand
+			local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+			if bp and bp:isContainer() then
+				for i = 0, bp:getSize() - 1 do
+					local it = bp:getItem(i)
+					if it and it:getId() == spearId then
+						it:moveTo(player, CONST_SLOT_LEFT)
+						break
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Mage/Druid food supply & auto-eat:
+-- Only spawns food when the bot is completely OUT OF FOOD (count == 0) AND has NO regeneration left.
+function BotSystem.checkMageFoodAndRegen(player, state)
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	if baseVoc ~= 1 and baseVoc ~= 2 then return end
+
+	local cond = player:getCondition(CONDITION_REGENERATION, CONDITIONID_DEFAULT)
+	local regenTicks = cond and cond:getTicks() or 0
+	local mushroomCount = player:getItemCount(3725) or 0
+
+	-- 1. Free food spawn: only when out of food (0) AND regeneration has ended (<= 0)
+	if mushroomCount == 0 and regenTicks <= 0 then
+		player:addItem(3725, 10)
+		mushroomCount = 10
+		logger.info("[Bot:" .. player:getName() .. "] Food empty & no regen! Spawned 10x brown mushrooms")
+	end
+
+	-- 2. Auto-eat: only when regeneration expired or under 30s remaining
+	if regenTicks < 30000 and mushroomCount > 0 then
+		if player:removeItem(3725, 1) then
+			player:feed(264) -- 1 brown mushroom = 264 seconds of regeneration
+		end
 	end
 end
 
@@ -7269,7 +7421,16 @@ end
 -- Strip embedded city resupply loops (Depot -> Bank -> Depot -> Shop -> Depot)
 -- and indoor/underground depot excursions from travel_to waypoints.
 function BotSystem.sanitizeTravelWaypoints(player, wps)
-	if not wps or #wps <= 3 then return wps end
+	if not wps or #wps <= 25 then return wps end
+
+	local pos = player:getPosition()
+	if wps[1] and wps[1].pos_x and wps[1].pos_x > 0 and wps[1].pos_z == pos.z then
+		local distToStart = math.max(math.abs(pos.x - wps[1].pos_x), math.abs(pos.y - wps[1].pos_y))
+		if distToStart <= 50 then
+			-- Bot is already within reasonable reach of the start waypoint (e.g. depot/city); keep full path
+			return wps
+		end
+	end
 
 	local surfaceZ = BotSystem.getExpectedZ(player)
 
@@ -7289,9 +7450,6 @@ function BotSystem.sanitizeTravelWaypoints(player, wps)
 					end
 					break
 				end
-			end
-			if not lastReturnIdx and k <= 6 then
-				lastReturnIdx = k
 			end
 		end
 	end
@@ -7889,6 +8047,26 @@ function BotSystem.navigateToHuntWaypoint(player, state)
 	else
 		-- Far away — use chunked goTo for long-range navigation
 		ok = BotSystem.goTo(player, targetPos)
+		if not ok then
+			-- Target waypoint is too far away. Search for a closer waypoint on this z-level to unstick
+			local bestDist = 9999
+			local bestIdx = nil
+			for i, w in ipairs(wps) do
+				if w and w.pos_x and w.pos_x > 0 and w.pos_z == pos.z then
+					local d = math.max(math.abs(pos.x - w.pos_x), math.abs(pos.y - w.pos_y))
+					if d < bestDist and d <= BOT_CONFIG.PATH_MAX_DIST then
+						bestDist = d
+						bestIdx = i
+					end
+				end
+			end
+			if bestIdx then
+				BotSystem.castDebug(player, state, "RECOVERY: wp " .. idx .. " too far (dist=" .. dist .. "), snapping to closest reachable wp " .. bestIdx .. " (dist=" .. bestDist .. ")")
+				state.huntWaypointIdx = bestIdx
+				state.huntWaypointSkipCount = 0
+				return
+			end
+		end
 	end
 
 	if not ok then

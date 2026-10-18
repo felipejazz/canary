@@ -334,6 +334,12 @@ function botManager.onThink(interval)
 			elseif botName == "_global" and (low == "hard_reset" or low == "hardreset" or low == "reset hard") then
 				local count = BotSystem.hardResetAllBots()
 				resultText = "Hard reset executed: " .. count .. " online bots reset to fresh level 8"
+			elseif botName == "_global" and (low == "clean" or low == "cleanmap" or low == "clean_map") then
+				local count = cleanMap() or 0
+				resultText = "Cleaned " .. count .. " items from the map"
+			elseif botName == "_global" and (low == "reload_scripts" or low == "scripts") then
+				local ok, err = pcall(function() Game.reload(RELOAD_TYPE_SCRIPTS) end)
+				resultText = ok and "Scripts reloaded successfully" or ("Reload failed: " .. tostring(err))
 			elseif low:match("^apply_edit") then
 				local targetPlayer = Player(botName)
 				if targetPlayer then
