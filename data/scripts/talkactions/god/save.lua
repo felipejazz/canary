@@ -16,7 +16,10 @@ function save.onSay(player, words, param)
 	else
 		saveServer()
 		SaveHirelings()
-		player:sendTextMessage(MESSAGE_ADMINISTRATOR, "Server has been saved.")
+		local snapName = string.format("save_%s_god", os.date("%Y%m%d_%H%M%S"))
+		local curlCmd = string.format("curl -s -X POST http://127.0.0.1:8085/api/snapshots/create -H 'Content-Type: application/json' -d '{\"folder\":\"sessions\",\"name\":\"%s\"}' >/dev/null 2>&1 &", snapName)
+		os.execute(curlCmd)
+		player:sendTextMessage(MESSAGE_ADMINISTRATOR, string.format("Server has been saved. Snapshot '%s' created.", snapName))
 	end
 	return true
 end

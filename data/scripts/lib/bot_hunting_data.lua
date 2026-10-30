@@ -26,8 +26,10 @@ function BotHuntData.loadAll()
 	BotHuntData.byTown = {}
 	BotHuntData.activeHunts = {}
 	BotHuntData.activeSpawnGroups = {}
+	BotHuntData.huntAccesses = {}
 
 	BotHuntData._loadScripts()
+	BotHuntData._loadHuntAccesses()
 	BotHuntData._loadWaypoints()
 	BotHuntData._loadTargets()
 	BotHuntData._loadFields()
@@ -99,6 +101,30 @@ function BotHuntData._loadScripts()
 			script_type = Result.getString(resultId, "script_type"),
 			spawn_group = spawnGroup,
 		}
+	until not Result.next(resultId)
+	Result.free(resultId)
+end
+
+function BotHuntData._loadHuntAccesses()
+	BotHuntData.huntAccesses = {}
+	local resultId = db.storeQuery(
+		"SELECT ha.`hunt_id`, qa.`required_storage_key`, qa.`required_storage_val`, qa.`min_level` " ..
+		"FROM `bot_hunt_accesses` ha " ..
+		"JOIN `bot_quest_accesses` qa ON ha.`access_id` = qa.`id` " ..
+		"WHERE ha.`is_mandatory` = 1"
+	)
+	if not resultId then return end
+
+	repeat
+		local huntId = Result.getNumber(resultId, "hunt_id")
+		local key = Result.getNumber(resultId, "required_storage_key")
+		local val = Result.getNumber(resultId, "required_storage_val")
+		local minLvl = Result.getNumber(resultId, "min_level")
+
+		if not BotHuntData.huntAccesses[huntId] then
+			BotHuntData.huntAccesses[huntId] = {}
+		end
+		table.insert(BotHuntData.huntAccesses[huntId], { key = key, val = val, min_level = minLvl })
 	until not Result.next(resultId)
 	Result.free(resultId)
 end
@@ -485,6 +511,24 @@ function BotHuntData.findHuntsForBot(player, botData, archetype, state)
 
 			-- Vocation check (bitmask AND)
 			if bit.band(script.vocation_mask, vocBit) > 0 then
+				-- Quest access check
+				if BotHuntData.huntAccesses and BotHuntData.huntAccesses[scriptId] then
+					local canAccess = true
+					for _, req in ipairs(BotHuntData.huntAccesses[scriptId]) do
+						local curVal = player:getStorageValue(req.key)
+						if curVal < req.val then
+							-- If player lacks storage, check if they meet the min level to execute the quest on-demand (Plano A)
+							if req.min_level and level < req.min_level then
+								canAccess = false
+								break
+							end
+						end
+					end
+					if not canAccess then
+						goto continue_script
+					end
+				end
+
 				-- Up to 2-bots-per-spawn check
 				local spawnKey = script.spawn_group or tostring(scriptId)
 				BotHuntData.activeSpawnOccupants = BotHuntData.activeSpawnOccupants or {}
@@ -517,9 +561,9 @@ function BotHuntData.findHuntsForBot(player, botData, archetype, state)
 						end
 
 						local preference = 0
-						-- Strong preference for hunts in current town (no boat travel needed)
+						-- Overwhelming preference for hunts in current town (strictly stay in current town)
 						if script.town_id == currentTownId then
-							preference = preference + 100
+							preference = preference + 1000
 						end
 						if hasSurfaceStart then
 							preference = preference + 25
@@ -582,6 +626,23 @@ function BotHuntData.findHuntsForBot(player, botData, archetype, state)
 		player:getName(), level, currentTownId or 0, #eligible))
 
 	return eligible
+end
+
+-- Get online active occupants for a hunt script
+function BotHuntData.getOccupants(scriptId)
+	BotHuntData.activeHuntOccupants = BotHuntData.activeHuntOccupants or {}
+	BotHuntData.activeSpawnOccupants = BotHuntData.activeSpawnOccupants or {}
+	local script = BotHuntData.scripts[scriptId]
+	local spawnKey = script and script.spawn_group or tostring(scriptId)
+	local sOccupants = BotHuntData.activeSpawnOccupants[spawnKey] or {}
+	local list = {}
+	for botGuid, _ in pairs(sOccupants) do
+		local p = Player(botGuid)
+		if p and not p:isRemoved() then
+			table.insert(list, p)
+		end
+	end
+	return list
 end
 
 -- Reserve a hunt script for a bot (returns true if successful, allowing up to 2 bots per spawn)

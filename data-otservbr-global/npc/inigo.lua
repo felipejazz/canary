@@ -532,18 +532,14 @@ local function creatureSayCallback(npc, creature, type, message)
 			end
 		end
 	elseif MsgContains(message, "rookgaard") and player:getLevel() <= 9 then
-		if Player.getAccountStorage(player, Storage.Dawnport.Mainland, true) == 1 then
-			npcHandler:say(
-				"Hmmm. Long time I visited that isle. Not very exciting place. \z
-			Why do you ask? Do you wish to go there?",
-				npc,
-				creature
-			)
-			npcHandler:setTopic(playerId, 1)
-		else
-			npcHandler:say("I'm sorry, but I cannot let you go there, you'll get much better training here than on that ancient isle.", npc, creature)
-			npcHandler:setTopic(playerId, 0)
-		end
+		-- No servidor local, libera a passagem para Rookgaard sem exigir ter ido a Mainland anteriormente
+		npcHandler:say(
+			"Hmmm. Long time I visited that isle. Not very exciting place. \z
+		Why do you ask? Do you wish to go there?",
+			npc,
+			creature
+		)
+		npcHandler:setTopic(playerId, 1)
 	elseif MsgContains(message, "yes") and npcHandler:getTopic(playerId) == 1 then
 		npcHandler:say({
 			"Careful, careful, it's a one-way ticket only! \z

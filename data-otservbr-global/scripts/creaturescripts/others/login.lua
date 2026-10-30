@@ -5,10 +5,13 @@ function playerLogin.onLogin(player)
 	local defaultTown = "Thais" -- default town where player is teleported if his home town is in premium area
 	local freeTowns = { "Ab'Dendriel", "Carlin", "Kazordoon", "Thais", "Venore", "Rookgaard", "Dawnport", "Dawnport Tutorial", "Island of Destiny" } -- towns in free account area
 
-	if not player:isPremium() and not table.contains(freeTowns, player:getTown():getName()) then
+	local isFreePrem = configManager.getBoolean(configKeys.FREE_PREMIUM)
+	local isBot = (player.isBot and player:isBot()) or (BOT_CONFIG and player:getAccountId() == BOT_CONFIG.BOT_ACCOUNT_ID) or player:getName():sub(1, 4) == "Bot "
+
+	if not isFreePrem and not isBot and not player:isPremium() and not table.contains(freeTowns, player:getTown():getName()) then
 		local town = player:getTown()
 		local sex = player:getSex()
-		local home = getHouseByPlayerGUID(getPlayerGUID(player))
+		local home = player:getHouse()
 		town = table.contains(freeTowns, town:getName()) and town or Town(defaultTown)
 		player:teleportTo(town:getTemplePosition())
 		player:setTown(town)
@@ -20,8 +23,8 @@ function playerLogin.onLogin(player)
 			player:setOutfit({ lookType = 136, lookHead = 114, lookBody = 120, lookLegs = 132, lookFeet = 115, lookAddons = 0 })
 		end
 
-		if home and not player:isPremium() then
-			setHouseOwner(home, 0)
+		if home then
+			home:setOwner(0)
 			player:sendTextMessage(MESSAGE_GAME_HIGHLIGHT, "You have lost your house because you are no longer a premium account.")
 			player:sendTextMessage(MESSAGE_GAME_HIGHLIGHT, "Your items from the house have been sent to your inbox.")
 		end

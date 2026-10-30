@@ -17,18 +17,11 @@
           "rank": 2
         },
         {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
           "id": 3355,
           "name": "leather helmet",
           "price": 1000,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "armor": [
@@ -47,18 +40,11 @@
           "rank": 2
         },
         {
-          "id": 3361,
-          "name": "leather armor",
-          "price": 1500,
+          "id": 3358,
+          "name": "chain armor",
+          "price": 66,
           "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3383,
-          "name": "dark armor",
-          "price": 380,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "legs": [
@@ -80,15 +66,8 @@
           "id": 3362,
           "name": "studded legs",
           "price": 800,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3369,
-          "name": "warrior helmet",
-          "price": 4900,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "feet": [
@@ -100,40 +79,33 @@
           "rank": 1
         },
         {
-          "id": 3554,
-          "name": "steel boots",
-          "price": 30000,
+          "id": 7457,
+          "name": "fur boots",
+          "price": 2800,
           "tag": "defensive",
           "rank": 2
-        },
-        {
-          "id": 3553,
-          "name": "bunnyslippers",
-          "price": 1200,
-          "tag": "speed",
-          "rank": 3
         },
         {
           "id": 3551,
           "name": "sandals",
           "price": 50,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "right": [
-        {
-          "id": 7773,
-          "name": "steel axe",
-          "price": 2000,
-          "tag": "defensive",
-          "rank": 1
-        },
         {
           "id": 7774,
           "name": "jagged sword",
           "price": 2000,
           "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 7773,
+          "name": "steel axe",
+          "price": 2000,
+          "tag": "defensive",
           "rank": 2
         },
         {
@@ -142,13 +114,6 @@
           "price": 1000,
           "tag": "brawler",
           "rank": 3
-        },
-        {
-          "id": 3271,
-          "name": "spike sword",
-          "price": 1799,
-          "tag": "budget",
-          "rank": 4
         }
       ],
       "left": [
@@ -172,13 +137,6 @@
           "price": 42,
           "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3059,
-          "name": "spellbook",
-          "price": 489,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
@@ -199,33 +157,26 @@
           "rank": 2
         },
         {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
           "id": 3355,
           "name": "leather helmet",
           "price": 1000,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "armor": [
-        {
-          "id": 3571,
-          "name": "ranger's cloak",
-          "price": 1000,
-          "tag": "speed",
-          "rank": 1
-        },
         {
           "id": 3357,
           "name": "plate armor",
           "price": 398,
           "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3571,
+          "name": "ranger's cloak",
+          "price": 1000,
+          "tag": "speed",
           "rank": 2
         },
         {
@@ -234,13 +185,6 @@
           "price": 139,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 3360,
-          "name": "golden armor",
-          "price": 20700,
-          "tag": "balanced",
-          "rank": 4
         }
       ],
       "legs": [
@@ -262,15 +206,8 @@
           "id": 3362,
           "name": "studded legs",
           "price": 800,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3369,
-          "name": "warrior helmet",
-          "price": 4900,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "feet": [
@@ -282,25 +219,18 @@
           "rank": 1
         },
         {
-          "id": 3554,
-          "name": "steel boots",
-          "price": 30000,
+          "id": 7457,
+          "name": "fur boots",
+          "price": 2800,
           "tag": "defensive",
           "rank": 2
-        },
-        {
-          "id": 3553,
-          "name": "bunnyslippers",
-          "price": 1200,
-          "tag": "speed",
-          "rank": 3
         },
         {
           "id": 3551,
           "name": "sandals",
           "price": 50,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "right": [
@@ -324,13 +254,6 @@
           "price": 142,
           "tag": "brawler",
           "rank": 3
-        },
-        {
-          "id": 7378,
-          "name": "royal spear",
-          "price": 2000,
-          "tag": "budget",
-          "rank": 4
         }
       ],
       "left": [
@@ -354,13 +277,6 @@
           "price": 42,
           "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3059,
-          "name": "spellbook",
-          "price": 489,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
@@ -381,18 +297,11 @@
           "rank": 2
         },
         {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
           "id": 3355,
           "name": "leather helmet",
           "price": 1000,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "armor": [
@@ -404,25 +313,18 @@
           "rank": 1
         },
         {
+          "id": 8042,
+          "name": "spirit cloak",
+          "price": 390,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
           "id": 3357,
           "name": "plate armor",
           "price": 398,
           "tag": "defensive",
-          "rank": 2
-        },
-        {
-          "id": 3359,
-          "name": "brass armor",
-          "price": 139,
-          "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 7993,
-          "name": "witchhunter's coat",
-          "price": 1500,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "legs": [
@@ -444,15 +346,8 @@
           "id": 3362,
           "name": "studded legs",
           "price": 800,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3369,
-          "name": "warrior helmet",
-          "price": 4900,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "feet": [
@@ -464,25 +359,18 @@
           "rank": 1
         },
         {
-          "id": 3554,
-          "name": "steel boots",
-          "price": 30000,
+          "id": 7457,
+          "name": "fur boots",
+          "price": 2800,
           "tag": "defensive",
           "rank": 2
-        },
-        {
-          "id": 3553,
-          "name": "bunnyslippers",
-          "price": 1200,
-          "tag": "speed",
-          "rank": 3
         },
         {
           "id": 3551,
           "name": "sandals",
           "price": 50,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "right": [
@@ -494,25 +382,18 @@
           "rank": 1
         },
         {
-          "id": 3071,
-          "name": "wand of inferno",
-          "price": 2895,
+          "id": 3074,
+          "name": "wand of vortex",
+          "price": 1200,
           "tag": "brawler",
           "rank": 2
         },
         {
-          "id": 3072,
-          "name": "wand of decay",
-          "price": 999,
+          "id": 3074,
+          "name": "wand of vortex",
+          "price": 1200,
           "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 3073,
-          "name": "wand of cosmic energy",
-          "price": 1899,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "left": [
@@ -536,13 +417,6 @@
           "price": 42,
           "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3059,
-          "name": "spellbook",
-          "price": 489,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
@@ -563,18 +437,11 @@
           "rank": 2
         },
         {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
           "id": 3355,
           "name": "leather helmet",
           "price": 1000,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "armor": [
@@ -586,25 +453,18 @@
           "rank": 1
         },
         {
+          "id": 8042,
+          "name": "spirit cloak",
+          "price": 390,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
           "id": 3357,
           "name": "plate armor",
           "price": 398,
           "tag": "defensive",
-          "rank": 2
-        },
-        {
-          "id": 3359,
-          "name": "brass armor",
-          "price": 139,
-          "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 7993,
-          "name": "witchhunter's coat",
-          "price": 1500,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "legs": [
@@ -626,15 +486,8 @@
           "id": 3362,
           "name": "studded legs",
           "price": 800,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3369,
-          "name": "warrior helmet",
-          "price": 4900,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "feet": [
@@ -646,25 +499,18 @@
           "rank": 1
         },
         {
-          "id": 3554,
-          "name": "steel boots",
-          "price": 30000,
+          "id": 7457,
+          "name": "fur boots",
+          "price": 2800,
           "tag": "defensive",
           "rank": 2
-        },
-        {
-          "id": 3553,
-          "name": "bunnyslippers",
-          "price": 1200,
-          "tag": "speed",
-          "rank": 3
         },
         {
           "id": 3551,
           "name": "sandals",
           "price": 50,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "right": [
@@ -676,25 +522,18 @@
           "rank": 1
         },
         {
-          "id": 3069,
-          "name": "necrotic rod",
-          "price": 989,
+          "id": 3066,
+          "name": "snakebite rod",
+          "price": 400,
           "tag": "brawler",
           "rank": 2
         },
         {
-          "id": 3070,
-          "name": "moonlight rod",
-          "price": 221,
+          "id": 3066,
+          "name": "snakebite rod",
+          "price": 400,
           "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 3065,
-          "name": "terra rod",
-          "price": 1899,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "left": [
@@ -718,13 +557,6 @@
           "price": 42,
           "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3059,
-          "name": "spellbook",
-          "price": 489,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     }
@@ -740,25 +572,18 @@
           "rank": 1
         },
         {
-          "id": 3353,
-          "name": "iron helmet",
-          "price": 1000,
+          "id": 3351,
+          "name": "steel helmet",
+          "price": 278,
           "tag": "budget",
           "rank": 2
         },
         {
-          "id": 7992,
-          "name": "mage hat",
-          "price": 19999,
-          "tag": "offensive",
+          "id": 3353,
+          "name": "iron helmet",
+          "price": 1000,
+          "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "armor": [
@@ -770,25 +595,18 @@
           "rank": 1
         },
         {
+          "id": 3380,
+          "name": "noble armor",
+          "price": 1500,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
           "id": 3357,
           "name": "plate armor",
           "price": 398,
           "tag": "budget",
-          "rank": 2
-        },
-        {
-          "id": 3385,
-          "name": "crown helmet",
-          "price": 2111,
-          "tag": "brawler",
           "rank": 3
-        },
-        {
-          "id": 3377,
-          "name": "scale armor",
-          "price": 70,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "legs": [
@@ -807,32 +625,25 @@
           "rank": 2
         },
         {
-          "id": 8095,
-          "name": "ranger legs",
-          "price": 800,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3378,
-          "name": "studded armor",
-          "price": 800,
+          "id": 3372,
+          "name": "brass legs",
+          "price": 46,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "feet": [
         {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
           "tag": "speed",
           "rank": 1
         },
         {
-          "id": 3554,
-          "name": "steel boots",
-          "price": 30000,
+          "id": 7457,
+          "name": "fur boots",
+          "price": 2800,
           "tag": "defensive",
           "rank": 2
         },
@@ -842,13 +653,6 @@
           "price": 999,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 3556,
-          "name": "crocodile boots",
-          "price": 2499,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "right": [
@@ -872,27 +676,20 @@
           "price": 1100,
           "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 7774,
-          "name": "jagged sword",
-          "price": 2000,
-          "tag": "budget",
-          "rank": 4
         }
       ],
       "left": [
         {
-          "id": 3415,
-          "name": "guardian shield",
-          "price": 1800,
+          "id": 3416,
+          "name": "dragon shield",
+          "price": 3898,
           "tag": "defensive",
           "rank": 1
         },
         {
-          "id": 3414,
-          "name": "mastermind shield",
-          "price": 65000,
+          "id": 3415,
+          "name": "guardian shield",
+          "price": 1800,
           "tag": "brawler",
           "rank": 2
         },
@@ -902,13 +699,6 @@
           "price": 399,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 8090,
-          "name": "spellbook of dark mysteries",
-          "price": 76200,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
@@ -922,33 +712,26 @@
           "rank": 1
         },
         {
-          "id": 3353,
-          "name": "iron helmet",
-          "price": 1000,
+          "id": 3351,
+          "name": "steel helmet",
+          "price": 278,
           "tag": "budget",
           "rank": 2
         },
         {
-          "id": 7992,
-          "name": "mage hat",
-          "price": 19999,
-          "tag": "offensive",
+          "id": 3353,
+          "name": "iron helmet",
+          "price": 1000,
+          "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "armor": [
         {
-          "id": 3370,
-          "name": "knight armor",
-          "price": 4500,
-          "tag": "defensive",
+          "id": 8044,
+          "name": "belted cape",
+          "price": 300,
+          "tag": "offensive",
           "rank": 1
         },
         {
@@ -959,18 +742,11 @@
           "rank": 2
         },
         {
-          "id": 8095,
-          "name": "ranger legs",
-          "price": 1500,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
           "id": 3357,
           "name": "plate armor",
           "price": 398,
           "tag": "budget",
-          "rank": 4
+          "rank": 3
         }
       ],
       "legs": [
@@ -989,32 +765,25 @@
           "rank": 2
         },
         {
-          "id": 8095,
-          "name": "ranger legs",
-          "price": 800,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3378,
-          "name": "studded armor",
-          "price": 800,
+          "id": 3372,
+          "name": "brass legs",
+          "price": 46,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "feet": [
         {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
           "tag": "speed",
           "rank": 1
         },
         {
-          "id": 3554,
-          "name": "steel boots",
-          "price": 30000,
+          "id": 7457,
+          "name": "fur boots",
+          "price": 2800,
           "tag": "defensive",
           "rank": 2
         },
@@ -1024,19 +793,12 @@
           "price": 999,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 3556,
-          "name": "crocodile boots",
-          "price": 2499,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "right": [
         {
-          "id": 7378,
-          "name": "royal spear",
+          "id": 3347,
+          "name": "hunting spear",
           "price": 2000,
           "tag": "offensive",
           "rank": 1
@@ -1054,27 +816,20 @@
           "price": 123,
           "tag": "speed",
           "rank": 3
-        },
-        {
-          "id": 3349,
-          "name": "crossbow",
-          "price": 142,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "left": [
         {
-          "id": 3415,
-          "name": "guardian shield",
-          "price": 1800,
+          "id": 3416,
+          "name": "dragon shield",
+          "price": 3898,
           "tag": "defensive",
           "rank": 1
         },
         {
-          "id": 3414,
-          "name": "mastermind shield",
-          "price": 65000,
+          "id": 3415,
+          "name": "guardian shield",
+          "price": 1800,
           "tag": "brawler",
           "rank": 2
         },
@@ -1084,13 +839,6 @@
           "price": 399,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 8090,
-          "name": "spellbook of dark mysteries",
-          "price": 76200,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
@@ -1104,55 +852,41 @@
           "rank": 1
         },
         {
-          "id": 3353,
-          "name": "iron helmet",
-          "price": 1000,
+          "id": 3351,
+          "name": "steel helmet",
+          "price": 278,
           "tag": "budget",
           "rank": 2
         },
         {
-          "id": 7992,
-          "name": "mage hat",
-          "price": 19999,
-          "tag": "offensive",
+          "id": 3353,
+          "name": "iron helmet",
+          "price": 1000,
+          "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "armor": [
         {
-          "id": 7993,
-          "name": "witchhunter's coat",
-          "price": 1500,
+          "id": 8043,
+          "name": "focus cape",
+          "price": 5789,
           "tag": "offensive",
           "rank": 1
+        },
+        {
+          "id": 8042,
+          "name": "spirit cloak",
+          "price": 390,
+          "tag": "speed",
+          "rank": 2
         },
         {
           "id": 7991,
           "name": "magician's robe",
           "price": 900,
           "tag": "budget",
-          "rank": 2
-        },
-        {
-          "id": 3377,
-          "name": "scale armor",
-          "price": 70,
-          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "legs": [
@@ -1171,32 +905,25 @@
           "rank": 2
         },
         {
-          "id": 8095,
-          "name": "ranger legs",
-          "price": 800,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3378,
-          "name": "studded armor",
-          "price": 800,
+          "id": 3372,
+          "name": "brass legs",
+          "price": 46,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "feet": [
         {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
           "tag": "speed",
           "rank": 1
         },
         {
-          "id": 3554,
-          "name": "steel boots",
-          "price": 30000,
+          "id": 7457,
+          "name": "fur boots",
+          "price": 2800,
           "tag": "defensive",
           "rank": 2
         },
@@ -1206,13 +933,6 @@
           "price": 999,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 3556,
-          "name": "crocodile boots",
-          "price": 2499,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "right": [
@@ -1224,9 +944,9 @@
           "rank": 1
         },
         {
-          "id": 3071,
-          "name": "wand of inferno",
-          "price": 2895,
+          "id": 3075,
+          "name": "wand of dragonbreath",
+          "price": 270,
           "tag": "brawler",
           "rank": 2
         },
@@ -1236,13 +956,6 @@
           "price": 1200,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 3073,
-          "name": "wand of cosmic energy",
-          "price": 1899,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "left": [
@@ -1254,9 +967,9 @@
           "rank": 1
         },
         {
-          "id": 3414,
-          "name": "mastermind shield",
-          "price": 65000,
+          "id": 3416,
+          "name": "dragon shield",
+          "price": 3898,
           "tag": "brawler",
           "rank": 2
         },
@@ -1266,13 +979,6 @@
           "price": 399,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 8090,
-          "name": "spellbook of dark mysteries",
-          "price": 76200,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
@@ -1286,55 +992,41 @@
           "rank": 1
         },
         {
-          "id": 3353,
-          "name": "iron helmet",
-          "price": 1000,
+          "id": 3351,
+          "name": "steel helmet",
+          "price": 278,
           "tag": "budget",
           "rank": 2
         },
         {
-          "id": 7992,
-          "name": "mage hat",
-          "price": 19999,
-          "tag": "offensive",
+          "id": 3353,
+          "name": "iron helmet",
+          "price": 1000,
+          "tag": "balanced",
           "rank": 3
-        },
-        {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "armor": [
         {
-          "id": 7993,
-          "name": "witchhunter's coat",
-          "price": 1500,
+          "id": 8043,
+          "name": "focus cape",
+          "price": 5789,
           "tag": "offensive",
           "rank": 1
+        },
+        {
+          "id": 8042,
+          "name": "spirit cloak",
+          "price": 390,
+          "tag": "speed",
+          "rank": 2
         },
         {
           "id": 7991,
           "name": "magician's robe",
           "price": 900,
           "tag": "budget",
-          "rank": 2
-        },
-        {
-          "id": 3377,
-          "name": "scale armor",
-          "price": 70,
-          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "legs": [
@@ -1353,32 +1045,25 @@
           "rank": 2
         },
         {
-          "id": 8095,
-          "name": "ranger legs",
-          "price": 800,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3378,
-          "name": "studded armor",
-          "price": 800,
+          "id": 3372,
+          "name": "brass legs",
+          "price": 46,
           "tag": "balanced",
-          "rank": 4
+          "rank": 3
         }
       ],
       "feet": [
         {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
           "tag": "speed",
           "rank": 1
         },
         {
-          "id": 3554,
-          "name": "steel boots",
-          "price": 30000,
+          "id": 7457,
+          "name": "fur boots",
+          "price": 2800,
           "tag": "defensive",
           "rank": 2
         },
@@ -1388,27 +1073,20 @@
           "price": 999,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 3556,
-          "name": "crocodile boots",
-          "price": 2499,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "right": [
         {
-          "id": 3070,
-          "name": "moonlight rod",
-          "price": 221,
+          "id": 3069,
+          "name": "necrotic rod",
+          "price": 989,
           "tag": "offensive",
           "rank": 1
         },
         {
-          "id": 3069,
-          "name": "necrotic rod",
-          "price": 989,
+          "id": 3070,
+          "name": "moonlight rod",
+          "price": 221,
           "tag": "brawler",
           "rank": 2
         },
@@ -1418,13 +1096,6 @@
           "price": 400,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 3065,
-          "name": "terra rod",
-          "price": 1899,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "left": [
@@ -1436,9 +1107,9 @@
           "rank": 1
         },
         {
-          "id": 3414,
-          "name": "mastermind shield",
-          "price": 65000,
+          "id": 3416,
+          "name": "dragon shield",
+          "price": 3898,
           "tag": "brawler",
           "rank": 2
         },
@@ -1448,13 +1119,6 @@
           "price": 399,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 8090,
-          "name": "spellbook of dark mysteries",
-          "price": 76200,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     }
@@ -1463,9 +1127,9 @@
     "knight": {
       "head": [
         {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
+          "id": 3391,
+          "name": "crusader helmet",
+          "price": 5899,
           "tag": "defensive",
           "rank": 1
         },
@@ -1473,37 +1137,30 @@
           "id": 3385,
           "name": "crown helmet",
           "price": 2111,
-          "tag": "brawler",
+          "tag": "balanced",
           "rank": 2
         },
         {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
+          "id": 3392,
+          "name": "royal helmet",
+          "price": 29980,
           "tag": "speed",
-          "rank": 4
+          "rank": 3
         }
       ],
       "armor": [
         {
-          "id": 3382,
-          "name": "crown legs",
-          "price": 11500,
-          "tag": "defensive",
+          "id": 3360,
+          "name": "golden armor",
+          "price": 20700,
+          "tag": "offensive",
           "rank": 1
         },
         {
-          "id": 3366,
-          "name": "magic plate armor",
-          "price": 99993,
-          "tag": "offensive",
+          "id": 3381,
+          "name": "crown armor",
+          "price": 11899,
+          "tag": "defensive",
           "rank": 2
         },
         {
@@ -1512,28 +1169,21 @@
           "price": 4500,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 3377,
-          "name": "scale armor",
-          "price": 70,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "legs": [
         {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
+          "id": 10387,
+          "name": "Zaoan legs",
+          "price": 14299,
           "tag": "defensive",
           "rank": 1
         },
         {
-          "id": 3567,
-          "name": "blue robe",
-          "price": 9800,
-          "tag": "speed",
+          "id": 3382,
+          "name": "crown legs",
+          "price": 11500,
+          "tag": "balanced",
           "rank": 2
         },
         {
@@ -1542,50 +1192,36 @@
           "price": 4555,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 11304,
-          "name": "Zaoan Legs",
-          "price": 800,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "feet": [
         {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
           "tag": "speed",
           "rank": 1
-        },
-        {
-          "id": 3556,
-          "name": "crocodile boots",
-          "price": 2499,
-          "tag": "defensive",
-          "rank": 2
         },
         {
           "id": 3554,
           "name": "steel boots",
           "price": 30000,
-          "tag": "budget",
-          "rank": 3
+          "tag": "defensive",
+          "rank": 2
         },
         {
-          "id": 6132,
-          "name": "Soft Boots",
-          "price": 1200,
+          "id": 6529,
+          "name": "pair of soft boots",
+          "price": 484948,
           "tag": "offensive",
-          "rank": 4
+          "rank": 3
         }
       ],
       "right": [
         {
-          "id": 7407,
-          "name": "haunted blade",
-          "price": 7700,
+          "id": 7383,
+          "name": "relic sword",
+          "price": 28900,
           "tag": "offensive",
           "rank": 1
         },
@@ -1597,57 +1233,43 @@
           "rank": 2
         },
         {
-          "id": 7414,
-          "name": "abyss hammer",
-          "price": 25000,
+          "id": 7451,
+          "name": "shadow sceptre",
+          "price": 9000,
           "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 7385,
-          "name": "crimson sword",
-          "price": 500,
-          "tag": "budget",
-          "rank": 4
         }
       ],
       "left": [
-        {
-          "id": 3419,
-          "name": "crown shield",
-          "price": 7945,
-          "tag": "defensive",
-          "rank": 1
-        },
         {
           "id": 3420,
           "name": "demon shield",
           "price": 30990,
           "tag": "speed",
+          "rank": 1
+        },
+        {
+          "id": 3434,
+          "name": "vampire shield",
+          "price": 18999,
+          "tag": "defensive",
           "rank": 2
         },
         {
           "id": 3416,
           "name": "dragon shield",
           "price": 3898,
-          "tag": "brawler",
+          "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 8090,
-          "name": "spellbook of dark mysteries",
-          "price": 76200,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
     "paladin": {
       "head": [
         {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
+          "id": 3391,
+          "name": "crusader helmet",
+          "price": 5899,
           "tag": "defensive",
           "rank": 1
         },
@@ -1655,22 +1277,15 @@
           "id": 3385,
           "name": "crown helmet",
           "price": 2111,
-          "tag": "brawler",
+          "tag": "balanced",
           "rank": 2
         },
         {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
+          "id": 3392,
+          "name": "royal helmet",
+          "price": 29980,
           "tag": "speed",
-          "rank": 4
+          "rank": 3
         }
       ],
       "armor": [
@@ -1682,33 +1297,143 @@
           "rank": 1
         },
         {
-          "id": 3382,
-          "name": "crown legs",
-          "price": 11500,
-          "tag": "defensive",
-          "rank": 2
-        },
-        {
-          "id": 3571,
-          "name": "ranger's cloak",
-          "price": 1000,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3370,
-          "name": "knight armor",
-          "price": 4500,
-          "tag": "budget",
-          "rank": 4
-        }
-      ],
-      "legs": [
-        {
           "id": 3381,
           "name": "crown armor",
           "price": 11899,
           "tag": "defensive",
+          "rank": 2
+        },
+        {
+          "id": 3567,
+          "name": "blue robe",
+          "price": 9800,
+          "tag": "speed",
+          "rank": 3
+        }
+      ],
+      "legs": [
+        {
+          "id": 10387,
+          "name": "Zaoan legs",
+          "price": 14299,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3382,
+          "name": "crown legs",
+          "price": 11500,
+          "tag": "balanced",
+          "rank": 2
+        },
+        {
+          "id": 3371,
+          "name": "knight legs",
+          "price": 4555,
+          "tag": "budget",
+          "rank": 3
+        }
+      ],
+      "feet": [
+        {
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
+          "tag": "speed",
+          "rank": 1
+        },
+        {
+          "id": 3554,
+          "name": "steel boots",
+          "price": 30000,
+          "tag": "defensive",
+          "rank": 2
+        },
+        {
+          "id": 6529,
+          "name": "pair of soft boots",
+          "price": 484948,
+          "tag": "offensive",
+          "rank": 3
+        }
+      ],
+      "right": [
+        {
+          "id": 7378,
+          "name": "royal spear",
+          "price": 2000,
+          "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 8027,
+          "name": "composite hornbow",
+          "price": 100000,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
+          "id": 3347,
+          "name": "hunting spear",
+          "price": 2000,
+          "tag": "budget",
+          "rank": 3
+        }
+      ],
+      "left": [
+        {
+          "id": 3420,
+          "name": "demon shield",
+          "price": 30990,
+          "tag": "speed",
+          "rank": 1
+        },
+        {
+          "id": 3434,
+          "name": "vampire shield",
+          "price": 18999,
+          "tag": "defensive",
+          "rank": 2
+        },
+        {
+          "id": 3416,
+          "name": "dragon shield",
+          "price": 3898,
+          "tag": "budget",
+          "rank": 3
+        }
+      ]
+    },
+    "sorcerer": {
+      "head": [
+        {
+          "id": 3391,
+          "name": "crusader helmet",
+          "price": 5899,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3385,
+          "name": "crown helmet",
+          "price": 2111,
+          "tag": "balanced",
+          "rank": 2
+        },
+        {
+          "id": 3392,
+          "name": "royal helmet",
+          "price": 29980,
+          "tag": "speed",
+          "rank": 3
+        }
+      ],
+      "armor": [
+        {
+          "id": 8043,
+          "name": "focus cape",
+          "price": 5789,
+          "tag": "offensive",
           "rank": 1
         },
         {
@@ -1719,55 +1444,486 @@
           "rank": 2
         },
         {
+          "id": 3381,
+          "name": "crown armor",
+          "price": 11899,
+          "tag": "defensive",
+          "rank": 3
+        }
+      ],
+      "legs": [
+        {
+          "id": 10387,
+          "name": "Zaoan legs",
+          "price": 14299,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3382,
+          "name": "crown legs",
+          "price": 11500,
+          "tag": "balanced",
+          "rank": 2
+        },
+        {
           "id": 3371,
           "name": "knight legs",
           "price": 4555,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 11304,
-          "name": "Zaoan Legs",
-          "price": 800,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "feet": [
         {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
           "tag": "speed",
           "rank": 1
         },
         {
-          "id": 3556,
-          "name": "crocodile boots",
-          "price": 2499,
+          "id": 3554,
+          "name": "steel boots",
+          "price": 30000,
           "tag": "defensive",
+          "rank": 2
+        },
+        {
+          "id": 6529,
+          "name": "pair of soft boots",
+          "price": 484948,
+          "tag": "offensive",
+          "rank": 3
+        }
+      ],
+      "right": [
+        {
+          "id": 3071,
+          "name": "wand of inferno",
+          "price": 2895,
+          "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 3073,
+          "name": "wand of cosmic energy",
+          "price": 1899,
+          "tag": "brawler",
+          "rank": 2
+        },
+        {
+          "id": 3072,
+          "name": "wand of decay",
+          "price": 999,
+          "tag": "defensive",
+          "rank": 3
+        }
+      ],
+      "left": [
+        {
+          "id": 3434,
+          "name": "vampire shield",
+          "price": 18999,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3420,
+          "name": "demon shield",
+          "price": 30990,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
+          "id": 8074,
+          "name": "spellbook of mind control",
+          "price": 15289,
+          "tag": "offensive",
+          "rank": 3
+        }
+      ]
+    },
+    "druid": {
+      "head": [
+        {
+          "id": 3391,
+          "name": "crusader helmet",
+          "price": 5899,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3385,
+          "name": "crown helmet",
+          "price": 2111,
+          "tag": "balanced",
+          "rank": 2
+        },
+        {
+          "id": 3392,
+          "name": "royal helmet",
+          "price": 29980,
+          "tag": "speed",
+          "rank": 3
+        }
+      ],
+      "armor": [
+        {
+          "id": 8043,
+          "name": "focus cape",
+          "price": 5789,
+          "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 3567,
+          "name": "blue robe",
+          "price": 9800,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
+          "id": 3381,
+          "name": "crown armor",
+          "price": 11899,
+          "tag": "defensive",
+          "rank": 3
+        }
+      ],
+      "legs": [
+        {
+          "id": 10387,
+          "name": "Zaoan legs",
+          "price": 14299,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3382,
+          "name": "crown legs",
+          "price": 11500,
+          "tag": "balanced",
+          "rank": 2
+        },
+        {
+          "id": 3371,
+          "name": "knight legs",
+          "price": 4555,
+          "tag": "budget",
+          "rank": 3
+        }
+      ],
+      "feet": [
+        {
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
+          "tag": "speed",
+          "rank": 1
+        },
+        {
+          "id": 3554,
+          "name": "steel boots",
+          "price": 30000,
+          "tag": "defensive",
+          "rank": 2
+        },
+        {
+          "id": 6529,
+          "name": "pair of soft boots",
+          "price": 484948,
+          "tag": "offensive",
+          "rank": 3
+        }
+      ],
+      "right": [
+        {
+          "id": 3067,
+          "name": "hailstorm rod",
+          "price": 2895,
+          "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 3065,
+          "name": "terra rod",
+          "price": 1899,
+          "tag": "brawler",
+          "rank": 2
+        },
+        {
+          "id": 8082,
+          "name": "underworld rod",
+          "price": 4245,
+          "tag": "defensive",
+          "rank": 3
+        }
+      ],
+      "left": [
+        {
+          "id": 3434,
+          "name": "vampire shield",
+          "price": 18999,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3420,
+          "name": "demon shield",
+          "price": 30990,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
+          "id": 8074,
+          "name": "spellbook of mind control",
+          "price": 15289,
+          "tag": "offensive",
+          "rank": 3
+        }
+      ]
+    }
+  },
+  "100": {
+    "knight": {
+      "head": [
+        {
+          "id": 10385,
+          "name": "Zaoan helmet",
+          "price": 98600,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3387,
+          "name": "demon helmet",
+          "price": 109888,
+          "tag": "offensive",
+          "rank": 2
+        },
+        {
+          "id": 3392,
+          "name": "royal helmet",
+          "price": 29980,
+          "tag": "speed",
+          "rank": 3
+        }
+      ],
+      "armor": [
+        {
+          "id": 3366,
+          "name": "magic plate armor",
+          "price": 99993,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3386,
+          "name": "dragon scale mail",
+          "price": 58499,
+          "tag": "offensive",
+          "rank": 2
+        },
+        {
+          "id": 10384,
+          "name": "Zaoan armor",
+          "price": 23498,
+          "tag": "brawler",
+          "rank": 3
+        }
+      ],
+      "legs": [
+        {
+          "id": 10387,
+          "name": "Zaoan legs",
+          "price": 14299,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3398,
+          "name": "dwarven legs",
+          "price": 800,
+          "tag": "balanced",
+          "rank": 2
+        },
+        {
+          "id": 3364,
+          "name": "golden legs",
+          "price": 33998,
+          "tag": "offensive",
+          "rank": 3
+        }
+      ],
+      "feet": [
+        {
+          "id": 6529,
+          "name": "pair of soft boots",
+          "price": 484948,
+          "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
+          "tag": "speed",
           "rank": 2
         },
         {
           "id": 3554,
           "name": "steel boots",
           "price": 30000,
-          "tag": "budget",
+          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 6132,
-          "name": "Soft Boots",
-          "price": 1200,
-          "tag": "offensive",
-          "rank": 4
         }
       ],
       "right": [
         {
-          "id": 8027,
-          "name": "composite hornbow",
-          "price": 100000,
+          "id": 7390,
+          "name": "the justice seeker",
+          "price": 150000,
+          "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 3319,
+          "name": "stonecutter axe",
+          "price": 2000,
+          "tag": "brawler",
+          "rank": 2
+        },
+        {
+          "id": 14001,
+          "name": "ornate mace",
+          "price": 75000,
+          "tag": "defensive",
+          "rank": 3
+        }
+      ],
+      "left": [
+        {
+          "id": 3414,
+          "name": "mastermind shield",
+          "price": 65000,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3420,
+          "name": "demon shield",
+          "price": 30990,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
+          "id": 6390,
+          "name": "nightmare shield",
+          "price": 349996,
+          "tag": "brawler",
+          "rank": 3
+        }
+      ]
+    },
+    "paladin": {
+      "head": [
+        {
+          "id": 10385,
+          "name": "Zaoan helmet",
+          "price": 98600,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3387,
+          "name": "demon helmet",
+          "price": 109888,
+          "tag": "offensive",
+          "rank": 2
+        },
+        {
+          "id": 3392,
+          "name": "royal helmet",
+          "price": 29980,
+          "tag": "speed",
+          "rank": 3
+        }
+      ],
+      "armor": [
+        {
+          "id": 8060,
+          "name": "master archer's armor",
+          "price": 300000,
+          "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 8862,
+          "name": "yalahari armor",
+          "price": 1500,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
+          "id": 8063,
+          "name": "paladin armor",
+          "price": 29990,
+          "tag": "budget",
+          "rank": 3
+        }
+      ],
+      "legs": [
+        {
+          "id": 10387,
+          "name": "Zaoan legs",
+          "price": 14299,
+          "tag": "defensive",
+          "rank": 1
+        },
+        {
+          "id": 3398,
+          "name": "dwarven legs",
+          "price": 800,
+          "tag": "balanced",
+          "rank": 2
+        },
+        {
+          "id": 3364,
+          "name": "golden legs",
+          "price": 33998,
+          "tag": "offensive",
+          "rank": 3
+        }
+      ],
+      "feet": [
+        {
+          "id": 6529,
+          "name": "pair of soft boots",
+          "price": 484948,
+          "tag": "offensive",
+          "rank": 1
+        },
+        {
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
+          "tag": "speed",
+          "rank": 2
+        },
+        {
+          "id": 3554,
+          "name": "steel boots",
+          "price": 30000,
+          "tag": "defensive",
+          "rank": 3
+        }
+      ],
+      "right": [
+        {
+          "id": 8026,
+          "name": "warsinger bow",
+          "price": 369900,
           "tag": "offensive",
           "rank": 1
         },
@@ -1784,20 +1940,13 @@
           "price": 2000,
           "tag": "budget",
           "rank": 3
-        },
-        {
-          "id": 7367,
-          "name": "enchanted spear",
-          "price": 245,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "left": [
         {
-          "id": 3419,
-          "name": "crown shield",
-          "price": 7945,
+          "id": 3414,
+          "name": "mastermind shield",
+          "price": 65000,
           "tag": "defensive",
           "rank": 1
         },
@@ -1809,1112 +1958,291 @@
           "rank": 2
         },
         {
-          "id": 3416,
-          "name": "dragon shield",
-          "price": 3898,
+          "id": 6390,
+          "name": "nightmare shield",
+          "price": 349996,
           "tag": "brawler",
           "rank": 3
-        },
-        {
-          "id": 8090,
-          "name": "spellbook of dark mysteries",
-          "price": 76200,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
     "sorcerer": {
       "head": [
         {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
+          "id": 10385,
+          "name": "Zaoan helmet",
+          "price": 98600,
           "tag": "defensive",
           "rank": 1
         },
         {
-          "id": 3385,
-          "name": "crown helmet",
-          "price": 2111,
-          "tag": "brawler",
+          "id": 3387,
+          "name": "demon helmet",
+          "price": 109888,
+          "tag": "offensive",
           "rank": 2
         },
         {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
+          "id": 3392,
+          "name": "royal helmet",
+          "price": 29980,
           "tag": "speed",
-          "rank": 4
+          "rank": 3
         }
       ],
       "armor": [
         {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
+          "id": 11687,
+          "name": "royal scale robe",
+          "price": 1500,
           "tag": "offensive",
           "rank": 1
         },
         {
+          "id": 8043,
+          "name": "focus cape",
+          "price": 5789,
+          "tag": "budget",
+          "rank": 2
+        },
+        {
           "id": 3567,
           "name": "blue robe",
           "price": 9800,
           "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 3382,
-          "name": "crown legs",
-          "price": 11500,
-          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 7993,
-          "name": "witchhunter's coat",
-          "price": 1500,
-          "tag": "budget",
-          "rank": 4
         }
       ],
       "legs": [
         {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
+          "id": 10387,
+          "name": "Zaoan legs",
+          "price": 14299,
           "tag": "defensive",
           "rank": 1
         },
         {
-          "id": 3567,
-          "name": "blue robe",
-          "price": 9800,
-          "tag": "speed",
+          "id": 3398,
+          "name": "dwarven legs",
+          "price": 800,
+          "tag": "balanced",
           "rank": 2
         },
         {
-          "id": 3371,
-          "name": "knight legs",
-          "price": 4555,
-          "tag": "budget",
+          "id": 3364,
+          "name": "golden legs",
+          "price": 33998,
+          "tag": "offensive",
           "rank": 3
-        },
-        {
-          "id": 11304,
-          "name": "Zaoan Legs",
-          "price": 800,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "feet": [
         {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
-          "tag": "speed",
+          "id": 6529,
+          "name": "pair of soft boots",
+          "price": 484948,
+          "tag": "offensive",
           "rank": 1
         },
         {
-          "id": 3556,
-          "name": "crocodile boots",
-          "price": 2499,
-          "tag": "defensive",
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
+          "tag": "speed",
           "rank": 2
         },
         {
           "id": 3554,
           "name": "steel boots",
           "price": 30000,
-          "tag": "budget",
+          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 6132,
-          "name": "Soft Boots",
-          "price": 1200,
-          "tag": "offensive",
-          "rank": 4
         }
       ],
       "right": [
         {
-          "id": 3075,
-          "name": "wand of dragonbreath",
-          "price": 270,
+          "id": 16096,
+          "name": "wand of defiance",
+          "price": 6300,
           "tag": "offensive",
           "rank": 1
         },
         {
-          "id": 3073,
-          "name": "wand of cosmic energy",
-          "price": 1899,
-          "tag": "budget",
+          "id": 16115,
+          "name": "wand of everblazing",
+          "price": 2000,
+          "tag": "brawler",
           "rank": 2
         },
         {
           "id": 8094,
           "name": "wand of voodoo",
           "price": 4300,
-          "tag": "brawler",
+          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "left": [
         {
-          "id": 3419,
-          "name": "crown shield",
-          "price": 7945,
-          "tag": "defensive",
+          "id": 8090,
+          "name": "spellbook of dark mysteries",
+          "price": 76200,
+          "tag": "offensive",
           "rank": 1
+        },
+        {
+          "id": 3414,
+          "name": "mastermind shield",
+          "price": 65000,
+          "tag": "defensive",
+          "rank": 2
         },
         {
           "id": 3420,
           "name": "demon shield",
           "price": 30990,
           "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 3416,
-          "name": "dragon shield",
-          "price": 3898,
-          "tag": "brawler",
           "rank": 3
-        },
-        {
-          "id": 8090,
-          "name": "spellbook of dark mysteries",
-          "price": 76200,
-          "tag": "offensive",
-          "rank": 4
         }
       ]
     },
     "druid": {
       "head": [
         {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
+          "id": 10385,
+          "name": "Zaoan helmet",
+          "price": 98600,
           "tag": "defensive",
           "rank": 1
         },
         {
-          "id": 3385,
-          "name": "crown helmet",
-          "price": 2111,
-          "tag": "brawler",
+          "id": 3387,
+          "name": "demon helmet",
+          "price": 109888,
+          "tag": "offensive",
           "rank": 2
         },
         {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 3374,
-          "name": "legion helmet",
-          "price": 38888,
+          "id": 3392,
+          "name": "royal helmet",
+          "price": 29980,
           "tag": "speed",
-          "rank": 4
+          "rank": 3
         }
       ],
       "armor": [
         {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
+          "id": 11687,
+          "name": "royal scale robe",
+          "price": 1500,
           "tag": "offensive",
           "rank": 1
         },
         {
+          "id": 8043,
+          "name": "focus cape",
+          "price": 5789,
+          "tag": "budget",
+          "rank": 2
+        },
+        {
           "id": 3567,
           "name": "blue robe",
           "price": 9800,
           "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 3382,
-          "name": "crown legs",
-          "price": 11500,
-          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 7993,
-          "name": "witchhunter's coat",
-          "price": 1500,
-          "tag": "budget",
-          "rank": 4
         }
       ],
       "legs": [
         {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
+          "id": 10387,
+          "name": "Zaoan legs",
+          "price": 14299,
           "tag": "defensive",
           "rank": 1
         },
         {
-          "id": 3567,
-          "name": "blue robe",
-          "price": 9800,
-          "tag": "speed",
+          "id": 3398,
+          "name": "dwarven legs",
+          "price": 800,
+          "tag": "balanced",
           "rank": 2
         },
         {
-          "id": 3371,
-          "name": "knight legs",
-          "price": 4555,
-          "tag": "budget",
+          "id": 3364,
+          "name": "golden legs",
+          "price": 33998,
+          "tag": "offensive",
           "rank": 3
-        },
-        {
-          "id": 11304,
-          "name": "Zaoan Legs",
-          "price": 800,
-          "tag": "brawler",
-          "rank": 4
         }
       ],
       "feet": [
         {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
-          "tag": "speed",
+          "id": 6529,
+          "name": "pair of soft boots",
+          "price": 484948,
+          "tag": "offensive",
           "rank": 1
         },
         {
-          "id": 3556,
-          "name": "crocodile boots",
-          "price": 2499,
-          "tag": "defensive",
+          "id": 3079,
+          "name": "boots of haste",
+          "price": 31499,
+          "tag": "speed",
           "rank": 2
         },
         {
           "id": 3554,
           "name": "steel boots",
           "price": 30000,
-          "tag": "budget",
+          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 6132,
-          "name": "Soft Boots",
-          "price": 1200,
-          "tag": "offensive",
-          "rank": 4
         }
       ],
       "right": [
         {
-          "id": 3067,
-          "name": "hailstorm rod",
-          "price": 2895,
+          "id": 16118,
+          "name": "glacial rod",
+          "price": 6486,
           "tag": "offensive",
           "rank": 1
         },
         {
-          "id": 3065,
-          "name": "terra rod",
-          "price": 1899,
-          "tag": "budget",
+          "id": 16117,
+          "name": "muck rod",
+          "price": 6250,
+          "tag": "brawler",
           "rank": 2
         },
         {
-          "id": 8093,
-          "name": "wand of draconia",
-          "price": 1447,
-          "tag": "brawler",
+          "id": 3067,
+          "name": "hailstorm rod",
+          "price": 2895,
+          "tag": "defensive",
           "rank": 3
-        },
-        {
-          "id": 8091,
-          "name": "Underworld Rod",
-          "price": 2000,
-          "tag": "speed",
-          "rank": 4
         }
       ],
       "left": [
-        {
-          "id": 3419,
-          "name": "crown shield",
-          "price": 7945,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 3420,
-          "name": "demon shield",
-          "price": 30990,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 3416,
-          "name": "dragon shield",
-          "price": 3898,
-          "tag": "brawler",
-          "rank": 3
-        },
         {
           "id": 8090,
           "name": "spellbook of dark mysteries",
           "price": 76200,
           "tag": "offensive",
-          "rank": 4
-        }
-      ]
-    }
-  },
-  "100": {
-    "knight": {
-      "head": [
-        {
-          "id": 11302,
-          "name": "Zaoan Helmet",
-          "price": 1000,
-          "tag": "defensive",
           "rank": 1
         },
-        {
-          "id": 3386,
-          "name": "dragon scale mail",
-          "price": 58499,
-          "tag": "brawler",
-          "rank": 2
-        },
-        {
-          "id": 3387,
-          "name": "demon helmet",
-          "price": 109888,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 8820,
-          "name": "Morik's helmet",
-          "price": 500000,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "armor": [
-        {
-          "id": 3364,
-          "name": "golden legs",
-          "price": 33998,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 11301,
-          "name": "Zaoan Armor",
-          "price": 1500,
-          "tag": "brawler",
-          "rank": 2
-        },
-        {
-          "id": 18404,
-          "name": "Prismatic Armor",
-          "price": 1500,
-          "tag": "speed",
-          "rank": 3
-        },
-        {
-          "id": 3366,
-          "name": "magic plate armor",
-          "price": 99993,
-          "tag": "budget",
-          "rank": 4
-        }
-      ],
-      "legs": [
-        {
-          "id": 11304,
-          "name": "Zaoan Legs",
-          "price": 800,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 18406,
-          "name": "Prismatic Legs",
-          "price": 800,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 3364,
-          "name": "golden legs",
-          "price": 33998,
-          "tag": "offensive",
-          "rank": 4
-        }
-      ],
-      "feet": [
-        {
-          "id": 11303,
-          "name": "Zaoan Shoes",
-          "price": 1200,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 6132,
-          "name": "Soft Boots",
-          "price": 1200,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 18408,
-          "name": "Prismatic Boots",
-          "price": 1200,
-          "tag": "brawler",
-          "rank": 4
-        }
-      ],
-      "right": [
-        {
-          "id": 7416,
-          "name": "bloody edge",
-          "price": 29700,
-          "tag": "offensive",
-          "rank": 1
-        },
-        {
-          "id": 7418,
-          "name": "nightmare blade",
-          "price": 34999,
-          "tag": "brawler",
-          "rank": 2
-        },
-        {
-          "id": 7420,
-          "name": "reaper's axe",
-          "price": 2000,
-          "tag": "defensive",
-          "rank": 3
-        },
-        {
-          "id": 7407,
-          "name": "haunted blade",
-          "price": 7700,
-          "tag": "budget",
-          "rank": 4
-        }
-      ],
-      "left": [
         {
           "id": 3414,
           "name": "mastermind shield",
           "price": 65000,
           "tag": "defensive",
-          "rank": 1
+          "rank": 2
         },
         {
           "id": 3420,
           "name": "demon shield",
           "price": 30990,
           "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 8905,
-          "name": "Spellbook of Dark Mysteries",
-          "price": 1000,
-          "tag": "offensive",
           "rank": 3
-        },
-        {
-          "id": 3416,
-          "name": "dragon shield",
-          "price": 3898,
-          "tag": "brawler",
-          "rank": 4
-        }
-      ]
-    },
-    "paladin": {
-      "head": [
-        {
-          "id": 11302,
-          "name": "Zaoan Helmet",
-          "price": 1000,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 3386,
-          "name": "dragon scale mail",
-          "price": 58499,
-          "tag": "brawler",
-          "rank": 2
-        },
-        {
-          "id": 3387,
-          "name": "demon helmet",
-          "price": 109888,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 8820,
-          "name": "Morik's helmet",
-          "price": 500000,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "armor": [
-        {
-          "id": 8891,
-          "name": "Master Archer's Armor",
-          "price": 1500,
-          "tag": "offensive",
-          "rank": 1
-        },
-        {
-          "id": 8063,
-          "name": "paladin armor",
-          "price": 29990,
-          "tag": "budget",
-          "rank": 2
-        },
-        {
-          "id": 18404,
-          "name": "Prismatic Armor",
-          "price": 1500,
-          "tag": "defensive",
-          "rank": 3
-        },
-        {
-          "id": 3571,
-          "name": "ranger's cloak",
-          "price": 1000,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "legs": [
-        {
-          "id": 11304,
-          "name": "Zaoan Legs",
-          "price": 800,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 18406,
-          "name": "Prismatic Legs",
-          "price": 800,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 3364,
-          "name": "golden legs",
-          "price": 33998,
-          "tag": "offensive",
-          "rank": 4
-        }
-      ],
-      "feet": [
-        {
-          "id": 11303,
-          "name": "Zaoan Shoes",
-          "price": 1200,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 6132,
-          "name": "Soft Boots",
-          "price": 1200,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 18408,
-          "name": "Prismatic Boots",
-          "price": 1200,
-          "tag": "brawler",
-          "rank": 4
-        }
-      ],
-      "right": [
-        {
-          "id": 8854,
-          "name": "Warsinger Bow",
-          "price": 2000,
-          "tag": "offensive",
-          "rank": 1
-        },
-        {
-          "id": 8855,
-          "name": "Royal Crossbow",
-          "price": 2000,
-          "tag": "brawler",
-          "rank": 2
-        },
-        {
-          "id": 8027,
-          "name": "composite hornbow",
-          "price": 100000,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 7368,
-          "name": "assassin star",
-          "price": 500,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "left": [
-        {
-          "id": 3414,
-          "name": "mastermind shield",
-          "price": 65000,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 3420,
-          "name": "demon shield",
-          "price": 30990,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 8905,
-          "name": "Spellbook of Dark Mysteries",
-          "price": 1000,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 3416,
-          "name": "dragon shield",
-          "price": 3898,
-          "tag": "brawler",
-          "rank": 4
-        }
-      ]
-    },
-    "sorcerer": {
-      "head": [
-        {
-          "id": 11302,
-          "name": "Zaoan Helmet",
-          "price": 1000,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 3386,
-          "name": "dragon scale mail",
-          "price": 58499,
-          "tag": "brawler",
-          "rank": 2
-        },
-        {
-          "id": 3387,
-          "name": "demon helmet",
-          "price": 109888,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 8820,
-          "name": "Morik's helmet",
-          "price": 500000,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "armor": [
-        {
-          "id": 8819,
-          "name": "animal cure",
-          "price": 5000,
-          "tag": "offensive",
-          "rank": 1
-        },
-        {
-          "id": 8871,
-          "name": "Royal Draken Mail",
-          "price": 1500,
-          "tag": "defensive",
-          "rank": 2
-        },
-        {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 18404,
-          "name": "Gill Coat",
-          "price": 1500,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "legs": [
-        {
-          "id": 11304,
-          "name": "Zaoan Legs",
-          "price": 800,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 18406,
-          "name": "Prismatic Legs",
-          "price": 800,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 3364,
-          "name": "golden legs",
-          "price": 33998,
-          "tag": "offensive",
-          "rank": 4
-        }
-      ],
-      "feet": [
-        {
-          "id": 11303,
-          "name": "Zaoan Shoes",
-          "price": 1200,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 6132,
-          "name": "Soft Boots",
-          "price": 1200,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 18408,
-          "name": "Prismatic Boots",
-          "price": 1200,
-          "tag": "brawler",
-          "rank": 4
-        }
-      ],
-      "right": [
-        {
-          "id": 8920,
-          "name": "Wand of Voodoo",
-          "price": 2000,
-          "tag": "offensive",
-          "rank": 1
-        },
-        {
-          "id": 8921,
-          "name": "Wand of Defiance",
-          "price": 2000,
-          "tag": "defensive",
-          "rank": 2
-        },
-        {
-          "id": 3075,
-          "name": "wand of dragonbreath",
-          "price": 270,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 8094,
-          "name": "wand of voodoo",
-          "price": 4300,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "left": [
-        {
-          "id": 3414,
-          "name": "mastermind shield",
-          "price": 65000,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 3420,
-          "name": "demon shield",
-          "price": 30990,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 8905,
-          "name": "Spellbook of Dark Mysteries",
-          "price": 1000,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 3416,
-          "name": "dragon shield",
-          "price": 3898,
-          "tag": "brawler",
-          "rank": 4
-        }
-      ]
-    },
-    "druid": {
-      "head": [
-        {
-          "id": 11302,
-          "name": "Zaoan Helmet",
-          "price": 1000,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 3386,
-          "name": "dragon scale mail",
-          "price": 58499,
-          "tag": "brawler",
-          "rank": 2
-        },
-        {
-          "id": 3387,
-          "name": "demon helmet",
-          "price": 109888,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 8820,
-          "name": "Morik's helmet",
-          "price": 500000,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "armor": [
-        {
-          "id": 8819,
-          "name": "animal cure",
-          "price": 5000,
-          "tag": "offensive",
-          "rank": 1
-        },
-        {
-          "id": 8871,
-          "name": "Royal Draken Mail",
-          "price": 1500,
-          "tag": "defensive",
-          "rank": 2
-        },
-        {
-          "id": 8092,
-          "name": "wand of starstorm",
-          "price": 3489,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 18404,
-          "name": "Gill Coat",
-          "price": 1500,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "legs": [
-        {
-          "id": 11304,
-          "name": "Zaoan Legs",
-          "price": 800,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 18406,
-          "name": "Prismatic Legs",
-          "price": 800,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 3381,
-          "name": "crown armor",
-          "price": 11899,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 3364,
-          "name": "golden legs",
-          "price": 33998,
-          "tag": "offensive",
-          "rank": 4
-        }
-      ],
-      "feet": [
-        {
-          "id": 11303,
-          "name": "Zaoan Shoes",
-          "price": 1200,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 2195,
-          "name": "Boots of Haste",
-          "price": 1200,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 6132,
-          "name": "Soft Boots",
-          "price": 1200,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 18408,
-          "name": "Prismatic Boots",
-          "price": 1200,
-          "tag": "brawler",
-          "rank": 4
-        }
-      ],
-      "right": [
-        {
-          "id": 8922,
-          "name": "Underworld Rod",
-          "price": 2000,
-          "tag": "offensive",
-          "rank": 1
-        },
-        {
-          "id": 8923,
-          "name": "velvet tapestry",
-          "price": 747,
-          "tag": "defensive",
-          "rank": 2
-        },
-        {
-          "id": 3067,
-          "name": "hailstorm rod",
-          "price": 2895,
-          "tag": "budget",
-          "rank": 3
-        },
-        {
-          "id": 8093,
-          "name": "wand of draconia",
-          "price": 1447,
-          "tag": "speed",
-          "rank": 4
-        }
-      ],
-      "left": [
-        {
-          "id": 3414,
-          "name": "mastermind shield",
-          "price": 65000,
-          "tag": "defensive",
-          "rank": 1
-        },
-        {
-          "id": 3420,
-          "name": "demon shield",
-          "price": 30990,
-          "tag": "speed",
-          "rank": 2
-        },
-        {
-          "id": 8905,
-          "name": "Spellbook of Dark Mysteries",
-          "price": 1000,
-          "tag": "offensive",
-          "rank": 3
-        },
-        {
-          "id": 3416,
-          "name": "dragon shield",
-          "price": 3898,
-          "tag": "brawler",
-          "rank": 4
         }
       ]
     }

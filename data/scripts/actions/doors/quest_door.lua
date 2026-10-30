@@ -11,9 +11,11 @@ end
 
 local questDoor = Action()
 function questDoor.onUse(player, item, fromPosition, target, toPosition, isHotkey)
+	local isBot = player.isBotPlayer and player:isBotPlayer()
+
 	for index, value in ipairs(QuestDoorTable) do
 		if value.closedDoor == item.itemid then
-			if item.actionid > 0 and player:getStorageValue(item.actionid) ~= -1 then
+			if isBot or (item.actionid > 0 and player:getStorageValue(item.actionid) ~= -1) then
 				item:transform(value.openDoor)
 				item:getPosition():sendSingleSoundEffect(SOUND_EFFECT_TYPE_ACTION_OPEN_DOOR)
 				player:teleportTo(toPosition, true)

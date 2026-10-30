@@ -65,7 +65,7 @@ function playerLoginGlobal.onLogin(player)
 	end
 
 	-- Send Recruiter Outfit
-	local resultId = db.storeQuery("SELECT `recruiter` FROM `accounts` WHERE `id`= " .. Game.getPlayerAccountId(getPlayerName(player)))
+	local resultId = db.storeQuery("SELECT `recruiter` FROM `accounts` WHERE `id`= " .. player:getAccountId())
 	if resultId then
 		local recruiterStatus = Result.getNumber(resultId, "recruiter")
 		local sex = player:getSex()

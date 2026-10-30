@@ -4,6 +4,8 @@
 -- Uses creature:startAutoWalk() + creature:isWalking() (server-side walk scheduler)
 -- ============================================================================
 
+BotSystem = BotSystem or {}
+
 if db and not db.botAsyncStoreQuery then
 	db.botAsyncStoreQuery = db.asyncStoreQuery or function(q, cb) local res = db.storeQuery(q); if cb then cb(res) end end
 end
@@ -30,7 +32,7 @@ local botWalkEvents = {}
 
 local function stepBotWalk(guid)
 	botWalkEvents[guid] = nil
-	local player = BotPlayers and BotPlayers[guid]
+	local player = (BotPlayers and BotPlayers[guid]) or Player(guid)
 	if not player or player:isRemoved() then
 		botWalkQueues[guid] = nil
 		return
@@ -64,6 +66,24 @@ local function stepBotWalk(guid)
 		botWalkEvents[guid] = addEvent(stepBotWalk, delay, guid)
 	else
 		botWalkQueues[guid] = nil
+	end
+end
+
+function BotSystem.cancelBotWalk(guid)
+	if not guid then return end
+	botWalkQueues[guid] = nil
+	if botWalkEvents[guid] then
+		stopEvent(botWalkEvents[guid])
+		botWalkEvents[guid] = nil
+	end
+	local p = (BotPlayers and BotPlayers[guid]) or Player(guid)
+	if p and not p:isRemoved() then
+		if p.stopWalk then
+			pcall(function() p:stopWalk() end)
+		end
+		if p.setMoveLocked then
+			pcall(function() p:setMoveLocked(false) end)
+		end
 	end
 end
 
@@ -134,15 +154,19 @@ local function implSetSlotItem(self, slot, itemId, count)
 	end
 	local item = Game.createItem(itemId, count or 1)
 	if not item then return false end
-	local flags = rawget(_G, "FLAG_NOLIMIT") or 1
-	local ok, ret = pcall(function() return self:addItemEx(item, false, slot, flags) end)
-	local noError = rawget(_G, "RETURNVALUE_NOERROR") or 0
-	if not ok or (ret ~= noError and ret ~= true and ret ~= 0) then
-		-- Cleanly discard created item; NEVER drop to floor
-		pcall(function() item:remove() end)
-		return false
+	-- 1. Try moving directly into the requested slot
+	local ok, ret = pcall(function() return item:moveToSlot(self, slot) end)
+	if ok and ret then
+		return true
 	end
-	return true
+	-- 2. Fallback to self:addItem with slot parameter without dropping on map
+	pcall(function() item:remove() end)
+	local fallbackItem = nil
+	local ok2 = pcall(function() fallbackItem = self:addItem(itemId, count or 1, false, 1, slot) end)
+	if ok2 and fallbackItem then
+		return true
+	end
+	return false
 end
 
 local function implCastSpell(self, spellName, target)
@@ -296,7 +320,7 @@ BOT_CONFIG = {
 	BOT_ACCOUNT_ID = 65000,
 	-- Active bot count comes from config.lua botPlayersOnline (default 75 if unset).
 	-- Capped by BotStartup against the actual DB pool size.
-	TARGET_ONLINE = 3,
+	TARGET_ONLINE = 30,
 	-- Sole consumer is botManager:interval() (bot_manager.lua), whose onThink body is now
 	-- ONLY the bot_commands queue poll — the population manager it was named for is disabled.
 	-- Was 10000, which made every /cavebot command wait 0-10s (mean 5s) and made agentic
@@ -408,51 +432,97 @@ FLOOR_CHANGE_STATE = {
 
 BOT_SPELLS = {
 	[1] = { -- Sorcerer (base voc 1)
-		{level = 1,   name = "exori vis",          combatType = COMBAT_ENERGYDAMAGE, range = 3, effect = CONST_ME_ENERGYHIT,    cd = 2, baseDmg = 15},
-		{level = 23,  name = "exori mort",         combatType = COMBAT_DEATHDAMAGE,  range = 3, effect = CONST_ME_MORTAREA,     cd = 2, baseDmg = 25},
-		{level = 28,  name = "exevo vis lux",      combatType = COMBAT_ENERGYDAMAGE, range = 5, effect = CONST_ME_ENERGYAREA,   cd = 4, baseDmg = 30},
-		{level = 45,  name = "adori vita vis",     combatType = COMBAT_DEATHDAMAGE,  range = 5, effect = CONST_ME_MORTAREA,     cd = 4, baseDmg = 50, isRune = true, pvpOnly = true},
-		{level = 60,  name = "exori gran vis",     combatType = COMBAT_ENERGYDAMAGE, range = 3, effect = CONST_ME_ENERGYHIT,    cd = 8, baseDmg = 45},
+		-- Strikes (Single-target)
+		{level = 12,  name = "exori vis",          combatType = COMBAT_ENERGYDAMAGE, range = 3, effect = CONST_ME_ENERGYHIT,    cd = 2, baseDmg = 20},
+		{level = 14,  name = "exori flam",         combatType = COMBAT_FIREDAMAGE,   range = 3, effect = CONST_ME_FIREATTACK,   cd = 2, baseDmg = 22},
+		{level = 16,  name = "exori mort",         combatType = COMBAT_DEATHDAMAGE,  range = 3, effect = CONST_ME_MORTAREA,     cd = 2, baseDmg = 26},
+		{level = 55,  name = "exori amp vis",      combatType = COMBAT_ENERGYDAMAGE, range = 4, effect = CONST_ME_ENERGYHIT,    cd = 4, baseDmg = 45},
+		{level = 60,  name = "exori gran vis",     combatType = COMBAT_ENERGYDAMAGE, range = 3, effect = CONST_ME_ENERGYHIT,    cd = 6, baseDmg = 55},
+		{level = 45,  name = "adori vita vis",     combatType = COMBAT_DEATHDAMAGE,  range = 5, effect = CONST_ME_MORTAREA,     cd = 2, baseDmg = 60, isRune = true, pvpOnly = true},
+		-- AoE / Waves / Ultimate (2+ targets)
+		{level = 18,  name = "exevo flam hur",     combatType = COMBAT_FIREDAMAGE,   range = 4, effect = CONST_ME_FIREAREA,     cd = 4, baseDmg = 35, isAoE = true},
+		{level = 23,  name = "exevo vis lux",      combatType = COMBAT_ENERGYDAMAGE, range = 5, effect = CONST_ME_ENERGYAREA,   cd = 4, baseDmg = 40, isAoE = true},
+		{level = 38,  name = "exevo gran vis lux", combatType = COMBAT_ENERGYDAMAGE, range = 7, effect = CONST_ME_ENERGYAREA,   cd = 6, baseDmg = 55, isAoE = true},
+		{level = 55,  name = "exevo gran mas vis", combatType = COMBAT_ENERGYDAMAGE, range = 0, effect = CONST_ME_BIGCLOUDS,    cd = 40, baseDmg = 90, isAoE = true},
+		{level = 60,  name = "exevo gran mas flam",combatType = COMBAT_FIREDAMAGE,   range = 0, effect = CONST_ME_FIREAREA,     cd = 40, baseDmg = 110, isAoE = true},
 	},
 	[2] = { -- Druid (base voc 2)
-		{level = 1,   name = "exori flam",         combatType = COMBAT_FIREDAMAGE,   range = 3, effect = CONST_ME_FIREATTACK,   cd = 2, baseDmg = 15},
-		{level = 21,  name = "exori frigo",        combatType = COMBAT_ICEDAMAGE,    range = 3, effect = CONST_ME_ICEATTACK,    cd = 2, baseDmg = 20},
-		{level = 28,  name = "exevo frigo hur",    combatType = COMBAT_ICEDAMAGE,    range = 5, effect = CONST_ME_ICEAREA,      cd = 4, baseDmg = 30},
-		{level = 45,  name = "adori vita vis",     combatType = COMBAT_DEATHDAMAGE,  range = 5, effect = CONST_ME_MORTAREA,     cd = 4, baseDmg = 50, isRune = true, pvpOnly = true},
-		{level = 60,  name = "exori gran frigo",   combatType = COMBAT_ICEDAMAGE,    range = 3, effect = CONST_ME_ICEAREA,      cd = 8, baseDmg = 45},
+		-- Strikes (Single-target)
+		{level = 13,  name = "exori tera",         combatType = COMBAT_EARTHDAMAGE,  range = 3, effect = CONST_ME_CARNIPHILA,   cd = 2, baseDmg = 20},
+		{level = 14,  name = "exori flam",         combatType = COMBAT_FIREDAMAGE,   range = 3, effect = CONST_ME_FIREATTACK,   cd = 2, baseDmg = 22},
+		{level = 15,  name = "exori frigo",        combatType = COMBAT_ICEDAMAGE,    range = 3, effect = CONST_ME_ICEATTACK,    cd = 2, baseDmg = 24},
+		{level = 38,  name = "exori moe ico",      combatType = COMBAT_PHYSICALDAMAGE,range = 3, effect = CONST_ME_POFF,        cd = 4, baseDmg = 35},
+		{level = 60,  name = "exori gran frigo",   combatType = COMBAT_ICEDAMAGE,    range = 3, effect = CONST_ME_ICEAREA,      cd = 6, baseDmg = 55},
+		{level = 45,  name = "adori vita vis",     combatType = COMBAT_DEATHDAMAGE,  range = 5, effect = CONST_ME_MORTAREA,     cd = 2, baseDmg = 60, isRune = true, pvpOnly = true},
+		-- AoE / Waves / Ultimate (2+ targets)
+		{level = 18,  name = "exevo frigo hur",    combatType = COMBAT_ICEDAMAGE,    range = 4, effect = CONST_ME_ICEAREA,      cd = 4, baseDmg = 35, isAoE = true},
+		{level = 38,  name = "exevo tera hur",     combatType = COMBAT_EARTHDAMAGE,  range = 5, effect = CONST_ME_CARNIPHILA,   cd = 6, baseDmg = 50, isAoE = true},
+		{level = 55,  name = "exevo gran mas tera",combatType = COMBAT_EARTHDAMAGE,  range = 0, effect = CONST_ME_PLANTATTACK,  cd = 40, baseDmg = 85, isAoE = true},
+		{level = 60,  name = "exevo gran mas frigo",combatType = COMBAT_ICEDAMAGE,   range = 0, effect = CONST_ME_ICETORNADO,   cd = 40, baseDmg = 105, isAoE = true},
 	},
 	[3] = { -- Paladin (base voc 3)
-		{level = 1,   name = "exori san",          combatType = COMBAT_HOLYDAMAGE,   range = 5, effect = CONST_ME_HOLYDAMAGE,   cd = 2, baseDmg = 20, projectile = CONST_ANI_ROYALSPEAR},
-		{level = 24,  name = "exori con",          combatType = COMBAT_PHYSICALDAMAGE,range = 5, cd = 2, baseDmg = 25, projectile = CONST_ANI_ROYALSPEAR},
-		{level = 60,  name = "exori gran con",     combatType = COMBAT_PHYSICALDAMAGE,range = 5, cd = 6, baseDmg = 40, projectile = CONST_ANI_ROYALSPEAR},
+		-- Strikes (Single-target)
+		{level = 23,  name = "exori con",          combatType = COMBAT_PHYSICALDAMAGE,range = 5, cd = 2, baseDmg = 25, projectile = CONST_ANI_ROYALSPEAR},
+		{level = 40,  name = "exori san",          combatType = COMBAT_HOLYDAMAGE,   range = 5, effect = CONST_ME_HOLYDAMAGE,   cd = 2, baseDmg = 35, projectile = CONST_ANI_ROYALSPEAR},
+		{level = 90,  name = "exori gran con",     combatType = COMBAT_PHYSICALDAMAGE,range = 5, cd = 6, baseDmg = 55, projectile = CONST_ANI_ROYALSPEAR},
+		-- AoE (2+ targets)
+		{level = 50,  name = "exevo mas san",      combatType = COMBAT_HOLYDAMAGE,   range = 0, effect = CONST_ME_HOLYAREA,     cd = 4, baseDmg = 50, isAoE = true},
 	},
 	[4] = { -- Knight (base voc 4)
-		{level = 1,   name = "exori min",          combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 2, baseDmg = 15},
-		{level = 20,  name = "exori",              combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 2, baseDmg = 25},
-		{level = 35,  name = "exori hur",          combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 4, baseDmg = 35},
-		{level = 45,  name = "exori gran",         combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 6, baseDmg = 50},
-		{level = 90,  name = "exori gran ico",     combatType = COMBAT_ICEDAMAGE,      range = 1, effect = CONST_ME_ICEATTACK,  cd = 8, baseDmg = 60},
+		-- Strikes (Single-target)
+		{level = 16,  name = "exori ico",          combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 2, baseDmg = 20},
+		{level = 28,  name = "exori hur",          combatType = COMBAT_PHYSICALDAMAGE, range = 4, effect = CONST_ME_HITAREA,    cd = 4, baseDmg = 30},
+		-- AoE (2+ targets)
+		{level = 33,  name = "exori mas",          combatType = COMBAT_PHYSICALDAMAGE, range = 0, effect = CONST_ME_HITAREA,    cd = 8, baseDmg = 35, isAoE = true},
+		{level = 35,  name = "exori",              combatType = COMBAT_PHYSICALDAMAGE, range = 0, effect = CONST_ME_HITAREA,    cd = 4, baseDmg = 45, isAoE = true},
+		{level = 70,  name = "exori min",          combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 6, baseDmg = 55, isAoE = true},
+		{level = 90,  name = "exori gran",         combatType = COMBAT_PHYSICALDAMAGE, range = 0, effect = CONST_ME_HITAREA,    cd = 6, baseDmg = 75, isAoE = true},
+		{level = 110, name = "exori gran ico",     combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 8, baseDmg = 90, isAoE = true},
 	},
 }
 
 BOT_HEAL_SPELLS = {
 	[1] = { -- Sorcerer
-		{level = 1,  name = "exura",       heal = 80,   cd = 1},
-		{level = 30, name = "exura vita",  heal = 200,  cd = 2},
+		{level = 8,  name = "exura",       heal = 80,   cd = 1, minHpPercent = 0.85},
+		{level = 20, name = "exura gran",  heal = 180,  cd = 1, minHpPercent = 0.65},
+		{level = 30, name = "exura vita",  heal = 500,  cd = 1, minHpPercent = 0.45},
 	},
 	[2] = { -- Druid
-		{level = 1,  name = "exura",       heal = 80,   cd = 1},
-		{level = 30, name = "exura vita",  heal = 200,  cd = 2},
+		{level = 8,  name = "exura",       heal = 80,   cd = 1, minHpPercent = 0.85},
+		{level = 20, name = "exura gran",  heal = 180,  cd = 1, minHpPercent = 0.65},
+		{level = 30, name = "exura vita",  heal = 500,  cd = 1, minHpPercent = 0.45},
 	},
 	[3] = { -- Paladin
-		{level = 1,  name = "exura",       heal = 80,   cd = 1},
-		{level = 30, name = "exura san",   heal = 250,  cd = 2},
+		{level = 8,  name = "exura",       heal = 80,   cd = 1, minHpPercent = 0.85},
+		{level = 20, name = "exura gran",  heal = 160,  cd = 1, minHpPercent = 0.70},
+		{level = 35, name = "exura san",   heal = 300,  cd = 1, minHpPercent = 0.60},
+		{level = 60, name = "exura gran san",heal = 600,cd = 1, minHpPercent = 0.45},
 	},
 	[4] = { -- Knight
-		{level = 1,  name = "exura",       heal = 80,   cd = 1},
-		{level = 30, name = "exura ico",   heal = 300,  cd = 2},
+		{level = 8,   name = "exura ico",     heal = 150,  cd = 1, minHpPercent = 0.80},
+		{level = 300, name = "exura med ico", heal = 450,  cd = 1, minHpPercent = 0.50},
 	},
 }
+
+BOT_HASTE_SPELLS = {
+	[1] = { -- Sorcerer
+		{level = 70, name = "utani gran hur", speed = 250, cd = 2},
+		{level = 20, name = "utani hur",      speed = 150, cd = 2},
+	},
+	[2] = { -- Druid
+		{level = 70, name = "utani gran hur", speed = 250, cd = 2},
+		{level = 20, name = "utani hur",      speed = 150, cd = 2},
+	},
+	[3] = { -- Paladin
+		{level = 70, name = "utani gran hur", speed = 250, cd = 2},
+		{level = 20, name = "utani hur",      speed = 150, cd = 2},
+	},
+	[4] = { -- Knight
+		{level = 110, name = "utani tempo hur", speed = 280, cd = 2},
+		{level = 20,  name = "utani hur",       speed = 150, cd = 2},
+	},
+}
+
 
 -- ============================================================================
 -- City Points of Interest (POIs) — keyed by town_id
@@ -469,7 +539,7 @@ CITY_WALK_Z = {
 	[8]  = 7,   -- Thais (surface)
 	[9]  = 7,   -- Venore (surface)
 	[10] = 7,   -- Ankrahmun (temple underground z=8, city surface z=7)
-	[11] = 8,   -- Edron (mountain city z=8)
+	[11] = 7,   -- Edron (temple underground z=8, city surface z=7)
 	[12] = 10,  -- Farmine (temple z=11, city surface z=10)
 	[13] = 7,   -- Darashia (temple at z=1 tower, city surface z=7)
 	[14] = 7,   -- Liberty Bay (surface)
@@ -523,11 +593,11 @@ CITY_POIS = {
 		{ name = "Venore Market",        pos = Position(32960, 32090, 7), type = "shop" },
 		{ name = "Venore Magic Shop",    pos = Position(32970, 32075, 7), type = "shop" },
 	},
-	[11] = { -- Edron (temple: 33217,31814,8)
-		{ name = "Edron Depot",          pos = Position(33217, 31814, 8), type = "depot" },
-		{ name = "Edron Temple",         pos = Position(33217, 31814, 8), type = "temple" },
-		{ name = "Edron Academy",        pos = Position(33230, 31830, 8), type = "npc" },
-		{ name = "Edron Weapon Shop",    pos = Position(33210, 31800, 8), type = "shop" },
+	[11] = { -- Edron (temple: 33217,31814,8; city surface z=7)
+		{ name = "Edron Depot",          pos = Position(33169, 31813, 7), type = "depot" },
+		{ name = "Edron Temple",         pos = Position(33203, 31815, 7), type = "temple" },
+		{ name = "Edron Academy",        pos = Position(33230, 31830, 7), type = "npc" },
+		{ name = "Edron Weapon Shop",    pos = Position(33210, 31800, 7), type = "shop" },
 	},
 	[7] = { -- Kazordoon (temple: 32649,31925,11) — underground dwarf city
 		{ name = "Kazordoon Depot",      pos = Position(32649, 31911, 11), type = "depot" },
@@ -711,12 +781,18 @@ BOT_CHAT = {
 }
 
 -- Build closed->open door lookup from door tables (loaded from data/libs/tables/doors.lua)
--- Only regular and key doors — quest/level doors should NOT be opened by bots
 CLOSED_TO_OPEN_DOOR = {}
+LOCKED_KEY_DOORS = {}
+QUEST_DOOR_MAP = {}
+LEVEL_DOOR_MAP = {}
+
 if KeyDoorTable then
 	for _, entry in ipairs(KeyDoorTable) do
 		if entry.closedDoor and entry.openDoor then
 			CLOSED_TO_OPEN_DOOR[entry.closedDoor] = entry.openDoor
+		end
+		if entry.lockedDoor and entry.openDoor then
+			LOCKED_KEY_DOORS[entry.lockedDoor] = entry.openDoor
 		end
 	end
 end
@@ -725,8 +801,152 @@ if CustomDoorTable then
 		if entry.closedDoor and entry.openDoor then
 			CLOSED_TO_OPEN_DOOR[entry.closedDoor] = entry.openDoor
 		end
+		if entry.lockedDoor and entry.openDoor then
+			CLOSED_TO_OPEN_DOOR[entry.lockedDoor] = entry.openDoor
+		end
 	end
 end
+if QuestDoorTable then
+	for _, entry in ipairs(QuestDoorTable) do
+		if entry.closedDoor and entry.openDoor then
+			CLOSED_TO_OPEN_DOOR[entry.closedDoor] = entry.openDoor
+			QUEST_DOOR_MAP[entry.closedDoor] = entry.openDoor
+		end
+		if entry.lockedDoor and entry.openDoor then
+			CLOSED_TO_OPEN_DOOR[entry.lockedDoor] = entry.openDoor
+			QUEST_DOOR_MAP[entry.lockedDoor] = entry.openDoor
+		end
+	end
+end
+if LevelDoorTable then
+	for _, entry in ipairs(LevelDoorTable) do
+		if entry.closedDoor and entry.openDoor then
+			LEVEL_DOOR_MAP[entry.closedDoor] = entry.openDoor
+		end
+	end
+end
+
+-- ============================================================================
+-- Catalogs: Keys (`HUNT_KEYS_BY_NUMBER`, `HUNT_KEYS_BY_HUNT`) & NPC Travel (`NPC_TRAVEL_ROUTES`)
+-- ============================================================================
+HUNT_KEYS_BY_NUMBER = {
+	[3033] = {
+		key_number = 3033, item_id = 2969, key_name = "Silver Key 3033 (Ab'Dendriel Troll Caves)",
+		door_x = 32655, door_y = 31655, door_z = 9,
+		obtain_type = "NPC_BUY", npc_name = "Shirith",
+		source_x = 32656, source_y = 31659, source_z = 9,
+		dialog_keywords = "hi|key|yes", cost_gp = 50,
+	},
+	[3940] = {
+		key_number = 3940, item_id = 2968, key_name = "Wooden Key 3940 (Fibula Dungeon)",
+		door_x = 32190, door_y = 32432, door_z = 8,
+		obtain_type = "NPC_BUY", npc_name = "Simon The Beggar",
+		source_x = 32186, source_y = 32471, source_z = 7,
+		dialog_keywords = "hi|help|yes|yes|yes", cost_gp = 800,
+	},
+	[3980] = {
+		key_number = 3980, item_id = 2972, key_name = "Golden Key 3980 (Deeper Fibula)",
+		door_x = 32277, door_y = 32420, door_z = 10,
+		obtain_type = "CHEST_QUEST", npc_name = "Quest Pile of Bones",
+		source_x = 32219, source_y = 32401, source_z = 10,
+		dialog_keywords = "use_chest", cost_gp = 0,
+	},
+	[3012] = {
+		key_number = 3012, item_id = 2970, key_name = "Copper Key 3012 (Hellgate)",
+		door_x = 32676, door_y = 31671, door_z = 10,
+		obtain_type = "NPC_BUY", npc_name = "Elathriel",
+		source_x = 32684, source_y = 31671, source_z = 9,
+		dialog_keywords = "hi|key|yes", cost_gp = 5000,
+	},
+	[5010] = {
+		key_number = 5010, item_id = 2969, key_name = "Silver Key 5010 (Black Knight Villa)",
+		door_x = 32824, door_y = 31969, door_z = 8,
+		obtain_type = "CHEST_QUEST", npc_name = "Dead Tree (BK Villa)",
+		source_x = 32800, source_y = 31959, source_z = 7,
+		dialog_keywords = "use_chest", cost_gp = 0,
+	},
+	[3800] = {
+		key_number = 3800, item_id = 2970, key_name = "Copper Key 3800 (Kazordoon Emperor)",
+		door_x = 32645, door_y = 31906, door_z = 3,
+		obtain_type = "CHEST_QUEST", npc_name = "Kazordoon Chest 3800",
+		source_x = 32605, source_y = 31908, source_z = 3,
+		dialog_keywords = "use_chest", cost_gp = 0,
+	},
+	[3801] = {
+		key_number = 3801, item_id = 2970, key_name = "Copper Key 3801 (Kazordoon Barracks)",
+		door_x = 32600, door_y = 31926, door_z = 6,
+		obtain_type = "CHEST_QUEST", npc_name = "Kazordoon Chest 3801",
+		source_x = 32648, source_y = 31905, source_z = 3,
+		dialog_keywords = "use_chest", cost_gp = 0,
+	},
+	[3802] = {
+		key_number = 3802, item_id = 2970, key_name = "Copper Key 3802 (Dwacatra Prison)",
+		door_x = 32602, door_y = 31975, door_z = 14,
+		obtain_type = "CHEST_QUEST", npc_name = "Kazordoon Chest 3802",
+		source_x = 32599, source_y = 31923, source_z = 6,
+		dialog_keywords = "use_chest", cost_gp = 0,
+	},
+	[909] = {
+		key_number = 909, item_id = 2969, key_name = "Silver Key 0909 (Falcon Bastion)",
+		door_x = 33360, door_y = 31350, door_z = 7,
+		obtain_type = "CHEST_QUEST", npc_name = "Falcon Bastion Chest",
+		source_x = 33377, source_y = 31321, source_z = 1,
+		dialog_keywords = "use_chest", cost_gp = 0,
+	},
+}
+
+HUNT_KEYS_BY_HUNT = {
+	[1232] = { 3033 },
+	[1237] = { 3940, 3980 },
+	[59]   = { 3940 },
+	[1278] = { 3940 },
+	[1284] = { 3012, 5010 },
+	[1285] = { 3012, 5010 },
+	[1282] = { 3800, 3801, 3802 },
+	[2085] = { 909 },
+}
+
+NPC_TRAVEL_ROUTES = {
+	-- Ice Islands Ferries (Nielson, Svenson, Carlson, Anderson)
+	{ npc_name = "Nielson", from_city = "Carlin", npc_x = 32233, npc_y = 31675, npc_z = 7, dest_keyword = "folda", to_destination = "Folda", cost_gp = 20, dest_x = 32046, dest_y = 31578, dest_z = 7 },
+	{ npc_name = "Nielson", from_city = "Carlin", npc_x = 32233, npc_y = 31675, npc_z = 7, dest_keyword = "senja", to_destination = "Senja", cost_gp = 20, dest_x = 32128, dest_y = 31664, dest_z = 7 },
+	{ npc_name = "Nielson", from_city = "Carlin", npc_x = 32233, npc_y = 31675, npc_z = 7, dest_keyword = "vega", to_destination = "Vega", cost_gp = 20, dest_x = 32020, dest_y = 31692, dest_z = 7 },
+	{ npc_name = "Svenson", from_city = "Folda", npc_x = 32045, npc_y = 31580, npc_z = 7, dest_keyword = "tibia", to_destination = "Carlin Ferry", cost_gp = 0, dest_x = 32235, dest_y = 31674, dest_z = 7 },
+	{ npc_name = "Carlson", from_city = "Vega", npc_x = 32022, npc_y = 31692, npc_z = 7, dest_keyword = "tibia", to_destination = "Carlin Ferry", cost_gp = 0, dest_x = 32235, dest_y = 31674, dest_z = 7 },
+	{ npc_name = "Anderson", from_city = "Senja", npc_x = 32127, npc_y = 31660, npc_z = 7, dest_keyword = "tibia", to_destination = "Carlin Ferry", cost_gp = 0, dest_x = 32235, dest_y = 31674, dest_z = 7 },
+	-- Local Ferries & Islands
+	{ npc_name = "Pemaret", from_city = "Cormaya", npc_x = 33286, npc_y = 31955, npc_z = 6, dest_keyword = "edron", to_destination = "Edron", cost_gp = 20, dest_x = 33176, dest_y = 31764, dest_z = 6 },
+	{ npc_name = "Captain Waverider", from_city = "Liberty Bay", npc_x = 32346, npc_y = 32859, npc_z = 7, dest_keyword = "peg leg", to_destination = "Meriana", cost_gp = 50, dest_x = 32346, dest_y = 32625, dest_z = 7 },
+	{ npc_name = "Sebastian", from_city = "Meriana", npc_x = 32349, npc_y = 32624, npc_z = 7, dest_keyword = "liberty bay", to_destination = "Liberty Bay", cost_gp = 50, dest_x = 32316, dest_y = 32702, dest_z = 7 },
+	{ npc_name = "Sebastian", from_city = "Meriana", npc_x = 32349, npc_y = 32624, npc_z = 7, dest_keyword = "nargor", to_destination = "Nargor", cost_gp = 50, dest_x = 32025, dest_y = 32812, dest_z = 7 },
+	{ npc_name = "Sebastian", from_city = "Nargor", npc_x = 32027, npc_y = 32814, npc_z = 7, dest_keyword = "meriana", to_destination = "Meriana", cost_gp = 50, dest_x = 32348, dest_y = 32625, dest_z = 7 },
+	{ npc_name = "Buddel", from_city = "Svargrond", npc_x = 32255, npc_y = 31195, npc_z = 7, dest_keyword = "okolnir", to_destination = "Okolnir", cost_gp = 50, dest_x = 32225, dest_y = 31381, dest_z = 7 },
+	{ npc_name = "Buddel", from_city = "Svargrond", npc_x = 32255, npc_y = 31195, npc_z = 7, dest_keyword = "helheim", to_destination = "Helheim", cost_gp = 50, dest_x = 32462, dest_y = 31174, dest_z = 7 },
+	{ npc_name = "Buddel", from_city = "Svargrond", npc_x = 32255, npc_y = 31195, npc_z = 7, dest_keyword = "tyrsung", to_destination = "Tyrsung", cost_gp = 50, dest_x = 32333, dest_y = 31227, dest_z = 7 },
+	{ npc_name = "Buddel", from_city = "Svargrond", npc_x = 32255, npc_y = 31195, npc_z = 7, dest_keyword = "camp", to_destination = "Raider Camp", cost_gp = 50, dest_x = 32021, dest_y = 31294, dest_z = 7 },
+	{ npc_name = "Lorek", from_city = "Port Hope", npc_x = 32679, npc_y = 32775, npc_z = 7, dest_keyword = "west", to_destination = "Port Hope West", cost_gp = 7, dest_x = 32558, dest_y = 32780, dest_z = 7 },
+	{ npc_name = "Lorek", from_city = "Port Hope", npc_x = 32679, npc_y = 32775, npc_z = 7, dest_keyword = "centre", to_destination = "Port Hope Centre", cost_gp = 7, dest_x = 32628, dest_y = 32771, dest_z = 7 },
+	{ npc_name = "Lorek", from_city = "Port Hope", npc_x = 32679, npc_y = 32775, npc_z = 7, dest_keyword = "darama", to_destination = "Darama Mountain", cost_gp = 30, dest_x = 32987, dest_y = 32729, dest_z = 7 },
+	{ npc_name = "Lorek", from_city = "Port Hope", npc_x = 32679, npc_y = 32775, npc_z = 7, dest_keyword = "chor", to_destination = "Chor", cost_gp = 30, dest_x = 32968, dest_y = 32799, dest_z = 7 },
+	{ npc_name = "Lorek", from_city = "Port Hope", npc_x = 32679, npc_y = 32775, npc_z = 7, dest_keyword = "banuta", to_destination = "Banuta", cost_gp = 30, dest_x = 32826, dest_y = 32631, dest_z = 7 },
+	{ npc_name = "Old Adall", from_city = "Port Hope", npc_x = 32629, npc_y = 32771, npc_z = 7, dest_keyword = "east", to_destination = "Port Hope East", cost_gp = 7, dest_x = 32679, dest_y = 32777, dest_z = 7 },
+	{ npc_name = "Old Adall", from_city = "Port Hope", npc_x = 32629, npc_y = 32771, npc_z = 7, dest_keyword = "west", to_destination = "Port Hope West", cost_gp = 7, dest_x = 32558, dest_y = 32780, dest_z = 7 },
+	{ npc_name = "Maris", from_city = "Yalahar", npc_x = 32648, npc_y = 31292, npc_z = 6, dest_keyword = "fenrock", to_destination = "Fenrock", cost_gp = 100, dest_x = 32561, dest_y = 31313, dest_z = 7 },
+	{ npc_name = "Maris", from_city = "Yalahar", npc_x = 32648, npc_y = 31292, npc_z = 6, dest_keyword = "mistrock", to_destination = "Mistrock", cost_gp = 100, dest_x = 32640, dest_y = 31439, dest_z = 7 },
+	{ npc_name = "Maris", from_city = "Fenrock", npc_x = 32563, npc_y = 31312, npc_z = 7, dest_keyword = "yalahar", to_destination = "Yalahar", cost_gp = 100, dest_x = 32649, dest_y = 31292, dest_z = 6 },
+	{ npc_name = "Maris", from_city = "Mistrock", npc_x = 32640, npc_y = 31437, npc_z = 7, dest_keyword = "yalahar", to_destination = "Yalahar", cost_gp = 100, dest_x = 32649, dest_y = 31292, dest_z = 6 },
+	{ npc_name = "Harlow", from_city = "Yalahar", npc_x = 32836, npc_y = 31364, npc_z = 7, dest_keyword = "vengoth", to_destination = "Vengoth", cost_gp = 100, dest_x = 32858, dest_y = 31549, dest_z = 7 },
+	{ npc_name = "Harlow", from_city = "Vengoth", npc_x = 32856, npc_y = 31549, npc_z = 7, dest_keyword = "yalahar", to_destination = "Yalahar", cost_gp = 0, dest_x = 32837, dest_y = 31366, dest_z = 7 },
+	{ npc_name = "Tarak", from_city = "Yalahar", npc_x = 32917, npc_y = 31198, npc_z = 7, dest_keyword = "passage", to_destination = "Yalahar Sunken", cost_gp = 50, dest_x = 32940, dest_y = 31182, dest_z = 7 },
+	{ npc_name = "Tarak", from_city = "Yalahar Sunken", npc_x = 32941, npc_y = 31181, npc_z = 7, dest_keyword = "passage", to_destination = "Yalahar Inner", cost_gp = 0, dest_x = 32916, dest_y = 31199, dest_z = 7 },
+	{ npc_name = "Captain Haba", from_city = "Svargrond", npc_x = 32353, npc_y = 31124, npc_z = 6, dest_keyword = "hunt", to_destination = "Sea Serpent Area", cost_gp = 0, dest_x = 31942, dest_y = 31047, dest_z = 6 },
+	{ npc_name = "Captain Haba", from_city = "Sea Serpent Area", npc_x = 31950, npc_y = 31045, npc_z = 6, dest_keyword = "svargrond", to_destination = "Svargrond", cost_gp = 0, dest_x = 32342, dest_y = 31123, dest_z = 6 },
+	{ npc_name = "The Blind Prophet", from_city = "Banuta", npc_x = 33021, npc_y = 32604, npc_z = 7, dest_keyword = "transport", to_destination = "Forbidden Lands", cost_gp = 0, dest_x = 33025, dest_y = 32580, dest_z = 6 },
+	{ npc_name = "Captain Max", from_city = "Liberty Bay", npc_x = 32298, npc_y = 32895, npc_z = 6, dest_keyword = "calassa", to_destination = "Calassa", cost_gp = 200, dest_x = 31915, dest_y = 32710, dest_z = 6 },
+	{ npc_name = "Captain Max", from_city = "Calassa", npc_x = 31915, npc_y = 32709, npc_z = 6, dest_keyword = "liberty bay", to_destination = "Liberty Bay", cost_gp = 0, dest_x = 32298, dest_y = 32895, dest_z = 6 },
+	{ npc_name = "Jack Fate", from_city = "Liberty Bay", npc_x = 32286, npc_y = 32891, npc_z = 6, dest_keyword = "goroma", to_destination = "Goroma", cost_gp = 0, dest_x = 32161, dest_y = 32558, dest_z = 6 },
+	{ npc_name = "Jack Fate", from_city = "Goroma", npc_x = 32161, npc_y = 32558, npc_z = 6, dest_keyword = "liberty bay", to_destination = "Liberty Bay", cost_gp = 500, dest_x = 32285, dest_y = 32892, dest_z = 6 },
+}
 
 -- Runtime state tables
 BotPlayers = BotPlayers or {}    -- {[guid] = playerRef}
@@ -740,8 +960,437 @@ CITY_TRAINING_STATUES = CITY_TRAINING_STATUES or {} -- {[townId] = {x, y, z, ite
 -- observation stays awake indefinitely; the C++ side separately refuses to give them tasks.
 BotDebugPinned = BotDebugPinned or {}
 
+QUEST_ACCESS_BY_ID = QUEST_ACCESS_BY_ID or {}
+QUEST_ACCESS_BY_CODE = QUEST_ACCESS_BY_CODE or {}
+HUNT_MANDATORY_ACCESSES = HUNT_MANDATORY_ACCESSES or {}
+
 BotSystem = BotSystem or {}
 BotSystem.formatChatText = formatTibiaChatText
+
+-- Load NPC travel routes, Hunt Keys, and Quest Accesses from MariaDB into Lua memory
+function BotSystem.loadNpcAndKeyCatalogs()
+	if not db or not db.storeQuery then return end
+	pcall(function()
+		local r1 = db.storeQuery("SELECT * FROM `bot_hunt_keys`")
+		if r1 then
+			repeat
+				local knum = Result.getNumber(r1, "key_number")
+				HUNT_KEYS_BY_NUMBER[knum] = {
+					key_number = knum,
+					item_id = Result.getNumber(r1, "item_id"),
+					key_name = Result.getString(r1, "key_name"),
+					door_x = Result.getNumber(r1, "door_x"),
+					door_y = Result.getNumber(r1, "door_y"),
+					door_z = Result.getNumber(r1, "door_z"),
+					obtain_type = Result.getString(r1, "obtain_type"),
+					npc_name = Result.getString(r1, "npc_name"),
+					source_x = Result.getNumber(r1, "source_x"),
+					source_y = Result.getNumber(r1, "source_y"),
+					source_z = Result.getNumber(r1, "source_z"),
+					dialog_keywords = Result.getString(r1, "dialog_keywords"),
+					cost_gp = Result.getNumber(r1, "cost_gp"),
+				}
+			until not Result.next(r1)
+			Result.free(r1)
+		end
+
+		local r2 = db.storeQuery("SELECT `hunt_id`, `key_number` FROM `bot_hunt_key_requirements` WHERE `is_mandatory` = 1")
+		if r2 then
+			HUNT_KEYS_BY_HUNT = {}
+			repeat
+				local hid = Result.getNumber(r2, "hunt_id")
+				local knum = Result.getNumber(r2, "key_number")
+				HUNT_KEYS_BY_HUNT[hid] = HUNT_KEYS_BY_HUNT[hid] or {}
+				table.insert(HUNT_KEYS_BY_HUNT[hid], knum)
+			until not Result.next(r2)
+			Result.free(r2)
+		end
+
+		local r3 = db.storeQuery("SELECT * FROM `bot_npc_routes`")
+		if r3 then
+			NPC_TRAVEL_ROUTES = {}
+			repeat
+				table.insert(NPC_TRAVEL_ROUTES, {
+					npc_name = Result.getString(r3, "npc_name"),
+					from_city = Result.getString(r3, "from_city"),
+					npc_x = Result.getNumber(r3, "npc_x"),
+					npc_y = Result.getNumber(r3, "npc_y"),
+					npc_z = Result.getNumber(r3, "npc_z"),
+					dest_keyword = Result.getString(r3, "dest_keyword"),
+					to_destination = Result.getString(r3, "to_destination"),
+					cost_gp = Result.getNumber(r3, "cost_gp"),
+					dest_x = Result.getNumber(r3, "dest_x"),
+					dest_y = Result.getNumber(r3, "dest_y"),
+					dest_z = Result.getNumber(r3, "dest_z"),
+					transport_type = Result.getString(r3, "transport_type"),
+					dialog_sequence = Result.getString(r3, "dialog_sequence"),
+				})
+			until not Result.next(r3)
+			Result.free(r3)
+		end
+
+		local r4 = db.storeQuery("SELECT * FROM `bot_quest_accesses`")
+		if r4 then
+			QUEST_ACCESS_BY_ID = {}
+			QUEST_ACCESS_BY_CODE = {}
+			repeat
+				local qid = Result.getNumber(r4, "id")
+				local qcode = Result.getString(r4, "access_code")
+				local accInfo = {
+					id = qid,
+					access_code = qcode,
+					name = Result.getString(r4, "name"),
+					quest_script_id = Result.getNumber(r4, "quest_script_id"),
+					npc_name = Result.getString(r4, "npc_name"),
+					npc_city = Result.getString(r4, "npc_city"),
+					npc_x = Result.getNumber(r4, "npc_x"),
+					npc_y = Result.getNumber(r4, "npc_y"),
+					npc_z = Result.getNumber(r4, "npc_z"),
+					dialog_keywords = Result.getString(r4, "dialog_keywords"),
+					cost_gp = Result.getNumber(r4, "cost_gp"),
+					required_storage_key = Result.getNumber(r4, "required_storage_key"),
+					required_storage_val = Result.getNumber(r4, "required_storage_val"),
+					min_level = Result.getNumber(r4, "min_level"),
+				}
+				QUEST_ACCESS_BY_ID[qid] = accInfo
+				QUEST_ACCESS_BY_CODE[qcode] = accInfo
+			until not Result.next(r4)
+			Result.free(r4)
+		end
+
+		local r5 = db.storeQuery("SELECT `hunt_id`, `access_id` FROM `bot_hunt_accesses` WHERE `is_mandatory` = 1")
+		if r5 then
+			HUNT_MANDATORY_ACCESSES = {}
+			repeat
+				local hid = Result.getNumber(r5, "hunt_id")
+				local aid = Result.getNumber(r5, "access_id")
+				HUNT_MANDATORY_ACCESSES[hid] = HUNT_MANDATORY_ACCESSES[hid] or {}
+				table.insert(HUNT_MANDATORY_ACCESSES[hid], aid)
+			until not Result.next(r5)
+			Result.free(r5)
+		end
+	end)
+end
+
+-- Record a live bot or tester impediment in `bot_impediments` for Dashboard tracking
+function BotSystem.recordImpediment(player, huntId, huntName, townName, impType, badgeLabel, details, pos)
+	if not player or not db then return end
+	local botName = player:getName()
+	local p = pos or player:getPosition()
+	local hid = tonumber(huntId) or 0
+	local hName = tostring(huntName or "")
+	local tName = tostring(townName or (player:getTown() and player:getTown():getName() or ""))
+	if hid > 0 and hName == "" and BotHuntData and BotHuntData.scripts and BotHuntData.scripts[hid] then
+		hName = BotHuntData.scripts[hid].name or ""
+		if tName == "" then tName = BotHuntData.scripts[hid].town_name or "" end
+	end
+
+	pcall(function()
+		local sql = string.format(
+			"INSERT INTO `bot_impediments` (`bot_name`, `hunt_id`, `hunt_name`, `town_name`, `impediment_type`, `badge_label`, `details`, `pos_x`, `pos_y`, `pos_z`, `resolved`) " ..
+			"VALUES (%s, %d, %s, %s, %s, %s, %s, %d, %d, %d, 0)",
+			db.escapeString(botName), hid, db.escapeString(hName), db.escapeString(tName),
+			db.escapeString(tostring(impType or "IMPEDIMENT")),
+			db.escapeString(tostring(badgeLabel or "")),
+			db.escapeString(tostring(details or "")),
+			p.x or 0, p.y or 0, p.z or 7
+		)
+		if db.botAsyncQuery then
+			db.botAsyncQuery(sql)
+		elseif db.asyncQuery then
+			db.asyncQuery(sql)
+		end
+	end)
+end
+
+-- Check if player has a key with actionId == keyNumber in their backpack or inventory
+function BotSystem.playerHasKey(player, keyNumber)
+	if not player or player:isRemoved() or not keyNumber or keyNumber <= 0 then return false, nil end
+	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+	if bp and bp.getItems then
+		local items = bp:getItems(true)
+		if items then
+			for _, it in ipairs(items) do
+				if it and it.getActionId and it:getActionId() == keyNumber then
+					return true, it
+				end
+			end
+		end
+	end
+	return false, nil
+end
+
+-- Give a physical key item with actionId = keyNumber into the player's backpack
+function BotSystem.givePlayerKey(player, keyNumber, itemId)
+	if not player or player:isRemoved() then return nil end
+	local hasIt, existing = BotSystem.playerHasKey(player, keyNumber)
+	if hasIt then return existing end
+
+	local keyItemId = (itemId and itemId > 0) and itemId or 2969
+	local keyItem = player:addItem(keyItemId, 1, false)
+	if keyItem and keyItem.setActionId then
+		keyItem:setActionId(keyNumber)
+	end
+	return keyItem
+end
+
+-- Get list of missing key metadata objects required for a hunt
+function BotSystem.getMissingKeysForHunt(player, huntId)
+	local missing = {}
+	if not huntId then return missing end
+	local reqList = HUNT_KEYS_BY_HUNT[tonumber(huntId)]
+	if not reqList or #reqList == 0 then return missing end
+
+	for _, knum in ipairs(reqList) do
+		local kInfo = HUNT_KEYS_BY_NUMBER[knum]
+		if kInfo and not BotSystem.playerHasKey(player, knum) then
+			table.insert(missing, kInfo)
+		end
+	end
+	return missing
+end
+
+-- Execute key acquisition interaction at NPC or Quest Chest
+function BotSystem.executeKeyAcquisitionStep(player, keyInfo, huntId, huntName, townName)
+	if not player or player:isRemoved() or not keyInfo then return false end
+	local knum = keyInfo.key_number
+	if BotSystem.playerHasKey(player, knum) then return true end
+
+	local isTester = player:getName():sub(1, 6) == "Tester"
+	local cost = tonumber(keyInfo.cost_gp) or 0
+
+	if keyInfo.obtain_type == "NPC_BUY" or keyInfo.obtain_type == "NPC_QUEST" then
+		-- Verify GP balance
+		if cost > 0 then
+			local totalMoney = (player:getMoney() or 0) + (player:getBankBalance() or 0)
+			if totalMoney < cost then
+				if isTester then
+					player:setBankBalance((player:getBankBalance() or 0) + cost)
+				else
+					local msg = string.format("Sem GP suficiente (%d/%d GP) para comprar Key #%d com %s", totalMoney, cost, knum, keyInfo.npc_name or "NPC")
+					BotSystem.recordImpediment(player, huntId, huntName, townName, "MISSING_KEY",
+						string.format("Key #%d (%d GP)", knum, cost), msg, player:getPosition())
+					logger.warn("[BotKey] " .. player:getName() .. ": " .. msg)
+					return false
+				end
+			end
+			if player.removeMoneyBank then
+				player:removeMoneyBank(cost)
+			end
+		end
+
+		-- Speak dialogue sequence visually in-game
+		local kwStr = keyInfo.dialog_keywords or "hi|key|yes"
+		local words = {}
+		for w in kwStr:gmatch("[^|]+") do
+			table.insert(words, w)
+		end
+		if #words > 0 then
+			player:say(words[1], TALKTYPE_SAY)
+			local pGuid = player:getGuid()
+			for i = 2, #words do
+				local word = words[i]
+				addEvent(function()
+					local p = Player(pGuid)
+					if p and not p:isRemoved() then
+						p:say(word, TALKTYPE_SAY)
+					end
+				end, (i - 1) * 450)
+			end
+		end
+
+		BotSystem.givePlayerKey(player, knum, keyInfo.item_id)
+		player:getPosition():sendMagicEffect(CONST_ME_MAGIC_BLUE)
+		logger.info(string.format("[BotKey] %s comprou/obteve Key #%d (%s) com NPC %s por %d GP!",
+			player:getName(), knum, keyInfo.key_name or "Key", keyInfo.npc_name or "NPC", cost))
+		return true
+	else
+		-- CHEST_QUEST
+		BotSystem.givePlayerKey(player, knum, keyInfo.item_id)
+		player:getPosition():sendMagicEffect(CONST_ME_MAGIC_GREEN)
+		player:say("*loots key " .. knum .. "*", TALKTYPE_MONSTER_SAY)
+		logger.info(string.format("[BotKey] %s obteve Key #%d (%s) no bau de quest em (%d,%d,%d)!",
+			player:getName(), knum, keyInfo.key_name or "Key", keyInfo.source_x, keyInfo.source_y, keyInfo.source_z))
+		return true
+	end
+end
+
+-- Get list of missing quest access metadata objects required for a hunt
+function BotSystem.getMissingQuestAccesses(player, huntId)
+	local missing = {}
+	if not huntId or not player or player:isRemoved() then return missing end
+	local accessList = HUNT_MANDATORY_ACCESSES[tonumber(huntId)]
+	if not accessList or #accessList == 0 then return missing end
+
+	for _, aid in ipairs(accessList) do
+		local accInfo = QUEST_ACCESS_BY_ID[aid]
+		if accInfo and accInfo.required_storage_key and accInfo.required_storage_key > 0 then
+			local curVal = player:getStorageValue(accInfo.required_storage_key)
+			if curVal < (accInfo.required_storage_val or 1) then
+				table.insert(missing, accInfo)
+			end
+		end
+	end
+	return missing
+end
+
+-- Execute quest access NPC interaction (Plano A: official NPC dialogue, GP fee, storage grant)
+function BotSystem.executeQuestNpcInteraction(player, accessInfo, huntId, huntName, townName)
+	if not player or player:isRemoved() or not accessInfo then return false end
+	local skey = accessInfo.required_storage_key
+	local sval = accessInfo.required_storage_val or 1
+	if player:getStorageValue(skey) >= sval then
+		return true
+	end
+
+	local isTester = player:getName():sub(1, 6) == "Tester"
+	local cost = tonumber(accessInfo.cost_gp) or 0
+
+	if cost > 0 then
+		local totalMoney = (player:getMoney() or 0) + (player:getBankBalance() or 0)
+		if totalMoney < cost then
+			if isTester then
+				player:setBankBalance((player:getBankBalance() or 0) + cost)
+			else
+				local msg = string.format("Sem GP suficiente (%d/%d GP) para pagar acesso de '%s' com %s",
+					totalMoney, cost, accessInfo.name or "Quest", accessInfo.npc_name or "NPC")
+				BotSystem.recordImpediment(player, huntId, huntName, townName, "MISSING_QUEST_GP",
+					string.format("%s (%d GP)", accessInfo.name or "Quest", cost), msg, player:getPosition())
+				logger.warn("[BotQuest] " .. player:getName() .. ": " .. msg)
+				return false
+			end
+		end
+		if player.removeMoneyBank then
+			player:removeMoneyBank(cost)
+		end
+	end
+
+	-- Speak dialogue sequence visually in-game: e.g. "hi,mission,yes"
+	local kwStr = accessInfo.dialog_keywords or "hi,mission,yes"
+	local words = {}
+	for w in kwStr:gmatch("[^,|]+") do
+		local trimmed = w:gsub("^%s+", ""):gsub("%s+$", "")
+		if trimmed ~= "" then
+			table.insert(words, trimmed)
+		end
+	end
+	if #words > 0 then
+		player:say(words[1], TALKTYPE_SAY)
+		local pGuid = player:getGuid()
+		for i = 2, #words do
+			local word = words[i]
+			addEvent(function()
+				local p = Player(pGuid)
+				if p and not p:isRemoved() then
+					p:say(word, TALKTYPE_SAY)
+				end
+			end, (i - 1) * 450)
+		end
+	end
+
+	-- Grant storage
+	player:setStorageValue(skey, sval)
+
+	-- Persist immediately to MariaDB player_storage
+	local pGuid = player:getGuid()
+	local sql = string.format(
+		"INSERT INTO `player_storage` (`player_id`, `key`, `value`) VALUES (%d, %d, %d) " ..
+		"ON DUPLICATE KEY UPDATE `value` = %d",
+		pGuid, skey, sval, sval
+	)
+	if db and db.botAsyncQuery then
+		db.botAsyncQuery(sql)
+	elseif db and db.asyncQuery then
+		db.asyncQuery(sql)
+	end
+
+	player:getPosition():sendMagicEffect(CONST_ME_MAGIC_BLUE)
+	logger.info(string.format("[BotQuest] %s completou acesso '%s' com NPC %s em (%d,%d,%d) (Storage %d = %d, custo %d GP)!",
+		player:getName(), accessInfo.name or accessInfo.access_code, accessInfo.npc_name or "NPC",
+		accessInfo.npc_x or 0, accessInfo.npc_y or 0, accessInfo.npc_z or 0,
+		skey, sval, cost))
+	return true
+end
+
+-- Find matching NPC travel route and perform visual dialogue + GP payment
+function BotSystem.performNpcTravelInteraction(player, curPos, destPos, wpLabel, huntId, huntName, townName)
+	if not player or player:isRemoved() then return false, nil end
+
+	-- Match route by proximity to NPC and/or destination coordinates
+	local bestRoute = nil
+	local bestScore = -999999
+
+	for _, r in ipairs(NPC_TRAVEL_ROUTES) do
+		local score = 0
+		if curPos then
+			local npcDist = math.max(math.abs(curPos.x - r.npc_x), math.abs(curPos.y - r.npc_y))
+			if npcDist <= 15 and math.abs(curPos.z - r.npc_z) <= 1 then
+				score = score + (100 - npcDist * 4)
+			end
+		end
+		if destPos then
+			local destDist = math.max(math.abs(destPos.x - r.dest_x), math.abs(destPos.y - r.dest_y))
+			if destDist <= 25 and math.abs(destPos.z - r.dest_z) <= 1 then
+				score = score + (200 - destDist * 5)
+			end
+		end
+		if wpLabel and wpLabel ~= "" then
+			local lowLabel = wpLabel:lower()
+			if lowLabel:find(r.dest_keyword:lower(), 1, true) or lowLabel:find(r.to_destination:lower(), 1, true) then
+				score = score + 80
+			end
+		end
+		if score > bestScore and score >= 40 then
+			bestScore = score
+			bestRoute = r
+		end
+	end
+
+	local npcName = bestRoute and bestRoute.npc_name or "Boat Captain"
+	local keyword = bestRoute and bestRoute.dest_keyword or "passage"
+	local cost = bestRoute and (tonumber(bestRoute.cost_gp) or 0) or 0
+	local isTester = player:getName():sub(1, 6) == "Tester"
+
+	-- Check and deduct GP fare
+	if cost > 0 then
+		local totalMoney = (player:getMoney() or 0) + (player:getBankBalance() or 0)
+		if totalMoney < cost then
+			if isTester then
+				player:setBankBalance((player:getBankBalance() or 0) + cost)
+			else
+				local msg = string.format("Sem GP suficiente (%d/%d GP) para viajar com %s para '%s'",
+					totalMoney, cost, npcName, bestRoute and bestRoute.to_destination or keyword)
+				BotSystem.recordImpediment(player, huntId, huntName, townName, "NO_GP_FOR_BOAT",
+					string.format("%s (%d GP)", npcName, cost), msg, curPos or player:getPosition())
+				logger.warn("[BotTravel] " .. player:getName() .. ": " .. msg)
+				return false, bestRoute
+			end
+		end
+		if player.removeMoneyBank then
+			player:removeMoneyBank(cost)
+		end
+	end
+
+	-- Visual chat dialogue in-game: "hi" -> "<keyword>" -> "yes"
+	player:say("hi", TALKTYPE_SAY)
+	local pGuid = player:getGuid()
+	addEvent(function()
+		local p = Player(pGuid)
+		if p and not p:isRemoved() then
+			p:say(keyword, TALKTYPE_SAY)
+		end
+	end, 400)
+	addEvent(function()
+		local p = Player(pGuid)
+		if p and not p:isRemoved() then
+			p:say("yes", TALKTYPE_SAY)
+		end
+	end, 800)
+
+	logger.info(string.format("[BotTravel] %s conversou com NPC %s ('hi' -> '%s' -> 'yes') pagando %d GP!",
+		player:getName(), npcName, keyword, cost))
+	return true, bestRoute
+end
 
 -- Parse the argument of `reload debug,<arg>`.
 --   numeric  -> that many bots, chosen automatically (legacy behaviour)
@@ -879,14 +1528,153 @@ function BotSystem.getSpawnPosition(player)
 		return templePos
 	end
 
-	-- Temple is on a different z (underground/tower) — use first POI position instead
+	-- Temple is on a different z (underground/tower) — find temple POI at street z-level
 	local pois = CITY_POIS[townId]
 	if pois and #pois > 0 then
+		for _, poi in ipairs(pois) do
+			if poi.type == "temple" then
+				return poi.pos
+			end
+		end
 		return pois[1].pos
 	end
 
 	-- Fallback: temple position with z overridden
 	return Position(templePos.x, templePos.y, walkZ)
+end
+
+function BotSystem.getTownTemplePos(townId)
+	local pois = CITY_POIS[townId]
+	if pois and #pois > 0 then
+		for _, poi in ipairs(pois) do
+			if poi.type == "temple" then
+				return poi.pos
+			end
+		end
+	end
+	local town = Town(townId)
+	if town then
+		local pos = town:getTemplePosition()
+		local walkZ = CITY_WALK_Z and CITY_WALK_Z[townId] or pos.z
+		return Position(pos.x, pos.y, walkZ)
+	end
+	return Position(32369, 32241, 7) -- default Thais temple
+end
+
+function BotSystem.getActualBotTown(player)
+	local pos = player:getPosition()
+	local currentTown = player:getTown()
+	if currentTown then
+		local templePos = currentTown:getTemplePosition()
+		if templePos and math.abs(pos.x - templePos.x) <= 250 and math.abs(pos.y - templePos.y) <= 250 then
+			return currentTown:getId()
+		end
+	end
+
+	local bestTownId = currentTown and currentTown:getId() or 8
+	local bestDist = 999999
+	for townId, pois in pairs(CITY_POIS) do
+		for _, poi in ipairs(pois) do
+			if poi.type == "temple" or poi.type == "depot" then
+				local d = math.abs(pos.x - poi.pos.x) + math.abs(pos.y - poi.pos.y)
+				if d < bestDist then
+					bestDist = d
+					bestTownId = townId
+				end
+			end
+		end
+	end
+
+	if bestDist <= 300 and currentTown and currentTown:getId() ~= bestTownId then
+		local newTown = Town(bestTownId)
+		if newTown then
+			pcall(function() player:setTown(newTown) end)
+		end
+	end
+
+	return bestTownId
+end
+
+_G.BotRelationshipsCache = _G.BotRelationshipsCache or {}
+
+function BotSystem.getRelationshipKey(botName, targetName)
+	return string.format("%s:%s", botName:lower(), targetName:lower())
+end
+
+function BotSystem.getRelationship(botName, targetName)
+	local key = BotSystem.getRelationshipKey(botName, targetName)
+	if _G.BotRelationshipsCache[key] then
+		return _G.BotRelationshipsCache[key]
+	end
+
+	local rel = {
+		affinity = 0,
+		status = "NEUTRAL",
+		notes = "",
+		huntState = "NONE"
+	}
+
+	if db and db.storeQuery then
+		local res = db.storeQuery(string.format(
+			"SELECT `affinity`, `status`, `notes` FROM `bot_relationships` WHERE `bot_name` = %s AND `target_name` = %s LIMIT 1",
+			db.escapeString(botName), db.escapeString(targetName)
+		))
+		if res then
+			rel.affinity = Result.getNumber(res, "affinity")
+			rel.status = Result.getString(res, "status")
+			rel.notes = Result.getString(res, "notes")
+			Result.free(res)
+			if rel.notes and rel.notes:find("hunt_state:") then
+				rel.huntState = rel.notes:match("hunt_state:([%w_]+)") or "NONE"
+			end
+		end
+	end
+
+	_G.BotRelationshipsCache[key] = rel
+	return rel
+end
+
+function BotSystem.setRelationship(botName, targetName, status, affinityDelta, huntState, noteText)
+	local rel = BotSystem.getRelationship(botName, targetName)
+	rel.status = status or rel.status or "NEUTRAL"
+	rel.affinity = math.max(-100, math.min(100, (rel.affinity or 0) + (affinityDelta or 0)))
+	rel.huntState = huntState or rel.huntState or "NONE"
+
+	local notesStr = string.format("hunt_state:%s | %s", rel.huntState, noteText or "")
+	rel.notes = notesStr
+
+	local key = BotSystem.getRelationshipKey(botName, targetName)
+	_G.BotRelationshipsCache[key] = rel
+
+	if db and db.botAsyncQuery then
+		db.botAsyncQuery(string.format(
+			"INSERT INTO `bot_relationships` (`bot_name`, `target_name`, `affinity`, `status`, `notes`, `last_interaction`) " ..
+			"VALUES (%s, %s, %d, %s, %s, NOW()) " ..
+			"ON DUPLICATE KEY UPDATE `affinity` = %d, `status` = %s, `notes` = %s, `last_interaction` = NOW()",
+			db.escapeString(botName), db.escapeString(targetName), rel.affinity, db.escapeString(rel.status), db.escapeString(notesStr),
+			rel.affinity, db.escapeString(rel.status), db.escapeString(notesStr)
+		))
+	end
+end
+
+function BotSystem.sendBotPrivateMessage(speaker, recipient, text)
+	if not speaker or not recipient or speaker:isRemoved() or recipient:isRemoved() then return end
+	pcall(function()
+		recipient:sendPrivateMessage(speaker, text, TALKTYPE_PRIVATE_FROM)
+		speaker:sendPrivateMessage(recipient, text, TALKTYPE_PRIVATE_TO)
+	end)
+	if db and db.botAsyncQuery then
+		db.botAsyncQuery(string.format(
+			"INSERT INTO `bot_audit_chats` (`sender`, `receiver`, `channel`, `message`, `llm_prompt`, `llm_response`, `action_taken`, `timestamp`) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())",
+			db.escapeString(speaker:getName()),
+			db.escapeString(recipient:getName()),
+			db.escapeString("Private"),
+			db.escapeString(text),
+			db.escapeString("Bot-to-Bot PM Negotiation"),
+			db.escapeString(text),
+			db.escapeString("PM_NEGOTIATION")
+		))
+	end
 end
 
 function BotSystem.checkZLevel(player, state)
@@ -1109,7 +1897,7 @@ function BotSystem.handleFloorChange(player, state)
 		local allTransitions = {}
 		local seen = {}
 		local function addFrom(center)
-			local transitions = BotSystem.findZTransitions(center, 12, goDown)
+			local transitions = BotSystem.findZTransitions(center, 16, goDown)
 			for _, entry in ipairs(transitions) do
 				local key = entry.pos.x .. "," .. entry.pos.y .. "," .. entry.type
 				if not seen[key] then
@@ -1462,6 +2250,66 @@ function BotSystem.startFloorChange(state, goDown, targetPos, extraSearchCenters
 		.. (extraSearchCenters and (" +" .. #extraSearchCenters .. " extra centers") or ""))
 end
 
+-- Fallback and recovery handler when a hunt z-transition fails
+function BotSystem.handleHuntFloorChangeFailed(player, state)
+	local wps = state.huntWaypoints
+	local idx = state.huntWaypointIdx
+	local wp = wps and idx and wps[idx]
+	if not wp or not wp.pos_x or wp.pos_x <= 0 then
+		BotSystem.skipHuntWaypoint(player, state, "z-transition failed")
+		return
+	end
+
+	local pos = player:getPosition()
+	local targetPos = Position(wp.pos_x, wp.pos_y, wp.pos_z)
+	local hDist = math.max(math.abs(pos.x - targetPos.x), math.abs(pos.y - targetPos.y))
+	local zDist = math.abs(pos.z - targetPos.z)
+
+	-- If bot is in reasonable proximity (<= 18 tiles horizontal, <= 2 floors vertical):
+	-- Safely relocate to the target floor so the hunt route doesn't break!
+	if hDist <= 18 and zDist <= 2 then
+		local destPos = targetPos
+		local targetTile = Tile(targetPos)
+		if not targetTile or targetTile:hasFlag(TILESTATE_BLOCKSOLID) then
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					local np = Position(targetPos.x + dx, targetPos.y + dy, targetPos.z)
+					local nt = Tile(np)
+					if nt and nt:getGround() and not nt:hasFlag(TILESTATE_BLOCKSOLID) then
+						destPos = np
+						break
+					end
+				end
+			end
+		end
+		player:teleportTo(destPos, true)
+		logger.info(string.format("[Bot:%s] HUNTING z-transition failsafe: relocated to (%d,%d,%d) for wp %d",
+			player:getName(), destPos.x, destPos.y, destPos.z, idx))
+		state.huntWaypointIdx = (idx < #wps) and (idx + 1) or 1
+		state.huntWaypointSkipCount = 0
+		state.floorChangeFailCount = 0
+		return
+	end
+
+	-- Too far away from the transition: track failures and recover to spawn/temple after 3 fails
+	state.floorChangeFailCount = (state.floorChangeFailCount or 0) + 1
+	if state.floorChangeFailCount >= 3 then
+		local spawn = BotSystem.getSpawnPosition(player)
+		if spawn and (spawn.x ~= pos.x or spawn.y ~= pos.y or spawn.z ~= pos.z) then
+			player:teleportTo(spawn, true)
+			logger.warn(string.format("[Bot:%s] HUNTING z-transition failed 3x (hDist=%d, zDist=%d), recovered to spawn (%d,%d,%d)",
+				player:getName(), hDist, zDist, spawn.x, spawn.y, spawn.z))
+			state.floorChangeFailCount = 0
+			state.huntWaypointIdx = 1
+			return
+		end
+	end
+
+	logger.warn(string.format("[Bot:%s] HUNTING floor change FAILED (hDist=%d, zDist=%d), skipping waypoint %s",
+		player:getName(), hDist, zDist, tostring(idx)))
+	BotSystem.skipHuntWaypoint(player, state, "z-transition failed")
+end
+
 -- ============================================================================
 -- Bot Quest / Access Storages helper
 -- Sets storages so bots can access doors, wagons, shrines, levers, teleports
@@ -1661,9 +2509,115 @@ function BotSystem.applyQuestStorages(player)
 		[Storage.Quest.U10_70.LionsRock.InnerSanctum.Message] = 1,
 		-- Wagon Ticket
 		[Storage.WagonTicket] = 2147483647,
+		-- Tibia Tales / Arito's Task (Nomad Cave Access)
+		[Storage.Quest.U8_1.TibiaTales.AritosTask] = 3,
+		[Storage.Quest.U8_1.TibiaTales.AritosTaskDoor] = 1,
+		-- Djinn War (Marid & Efreet Factions + Doors)
+		[40429] = 1,
+		[40430] = 1,
+		[40431] = 2,
+		[40432] = 2,
+		[40433] = 1,
+		[40434] = 1,
+		[40435] = 2,
+		[40436] = 2,
+		[40437] = 2,
+		[40438] = 3,
+		[40439] = 1,
+		[40440] = 1,
+		[40441] = 1,
+		[40442] = 3,
+		[40443] = 3,
+		[40444] = 3,
+		[40445] = 1,
+		[40446] = 1,
+		-- The Ape City & Explorer Society
+		[40612] = 1,
+		[40613] = 18,
+		[40614] = 1,
+		[40615] = 1,
+		[40617] = 1,
+		[40619] = 1,
+		[40629] = 62,
+		[40638] = 2,
+		[40644] = 56,
+		[40647] = 1,
+		[40648] = 1,
+		[40649] = 1,
+		[40650] = 1,
+		[40651] = 1,
+		[40652] = 1,
+		[40653] = 1,
+		[40654] = 1,
+		[40655] = 1,
+		-- The Shattered Isles (Meriana, Laguna, Goroma, Nargor)
+		[40827] = 1,
+		[40828] = 3,
+		[40829] = 2,
+		[40830] = 1,
+		[40831] = 3,
+		[40832] = 5,
+		[40833] = 1,
+		[40834] = 1,
+		[40835] = 2,
+		[40836] = 1,
+		[40837] = 4,
+		[40843] = 1,
+		-- Pits of Inferno & Inquisition & Vengoth & Elemental Spheres
+		[41017] = 1,
+		[41018] = 1,
+		[41651] = 1,
+		[41691] = 20,
+		[41912] = 1,
+		-- Barbarian Test & The Ice Islands & Sea Serpent
+		[41174] = 8,
+		[41175] = 3,
+		[41176] = 3,
+		[41177] = 3,
+		[41271] = 1,
+		[41272] = 1,
+		[41273] = 1,
+		[41274] = 1,
+		[41275] = 1,
+		[41276] = 32,
+		[41277] = 3,
+		[41278] = 5,
+		[41279] = 3,
+		[41280] = 2,
+		[41281] = 6,
+		[41282] = 8,
+		[41283] = 3,
+		[41284] = 4,
+		[41285] = 2,
+		[41286] = 2,
+		[41287] = 2,
+		[41288] = 6,
+		[41303] = 1,
+		[41685] = 2,
+		-- Yalahar & Zao & Rathleton & Feyrist & Lion's Rock & Ferumbras
+		[41950] = 1,
+		[42601] = 21,
+		[42701] = 28,
+		[43000] = 12,
+		[44580] = 300,
+		[44801] = 11,
+		[45217] = 1,
+		[45751] = 1,
 	}
 	for key, value in pairs(botStorages) do
-		player:setStorageValue(key, value)
+		local isGatedAccess = false
+		if QUEST_ACCESS_BY_ID then
+			for _, acc in pairs(QUEST_ACCESS_BY_ID) do
+				if acc.required_storage_key == key then
+					isGatedAccess = true
+					break
+				end
+			end
+		end
+		-- Only grant storages that are NOT gated access quests (gated quests must be acquired via Plano A)
+		if not isGatedAccess then
+			player:setStorageValue(key, value)
+		end
 	end
 end
 
@@ -1798,6 +2752,15 @@ function BotSystem.setPopulation(targetCount, opts)
 				if not chosen[candidate] and #botNames < targetCount then
 					table.insert(botNames, candidate)
 					chosen[candidate] = true
+				end
+			end
+			-- Fallback para preencher exatamente targetCount caso haja colisoes de arredondamento
+			if #botNames < targetCount then
+				for _, candidate in ipairs(allBotNames) do
+					if not chosen[candidate] and #botNames < targetCount then
+						table.insert(botNames, candidate)
+						chosen[candidate] = true
+					end
 				end
 			end
 		end
@@ -2446,7 +3409,16 @@ function BotSystem.executeCavebotCommand(player, state, cmdStr)
 	local cmd, args = cmdStr:match("^(%S+)%s*(.*)")
 	if not cmd then return end
 	cmd = cmd:lower()
-	if cmd == "apply_edit" then
+	if cmd == "unstuck" or cmd == "teleport_temple" then
+		BotSystem.clearAllTasks(player, state)
+		local spawnPos = BotSystem.getSpawnPosition(player)
+		if spawnPos then
+			player:teleportTo(spawnPos, true)
+			spawnPos:sendMagicEffect(CONST_ME_TELEPORT)
+		end
+		state.state = BOT_STATE.IDLE
+		return "Unstuck: teleported to temple (" .. (spawnPos and (spawnPos.x .. "," .. spawnPos.y .. "," .. spawnPos.z) or "?") .. ")"
+	elseif cmd == "apply_edit" then
 		local data = {}
 		for k, v in args:gmatch('"(%w+)"%s*:%s*([^,}]+)') do
 			v = v:gsub('^"(.-)"$', '%1')
@@ -3589,9 +4561,16 @@ function BotSystem.processCavebotTravel(player, state)
 		local pos = player:getPosition()
 		local dist = math.max(math.abs(pos.x - npcPos.x), math.abs(pos.y - npcPos.y))
 		if dist <= 2 and pos.z == npcPos.z then
-			-- Adjacent or near NPC — say hi and proceed
-			BotSystem.castDebug(player, state, "Travel: at boat NPC, saying hi...")
-			player:say("hi", TALKTYPE_SAY)
+			-- Adjacent or near NPC — perform visual dialogue and deduct GP
+			BotSystem.castDebug(player, state, "Travel: at boat NPC, talking to captain...")
+			local ok = BotSystem.performNpcTravelInteraction(player, pos, state.travelDestBoatPos, state.travelDestTownName, state.huntScriptId, nil, nil)
+			if not ok then
+				state.cavebotCommand = nil
+				state.travelPhase = nil
+				state.travelBoatNpcPos = nil
+				state.state = BOT_STATE.IDLE
+				return
+			end
 			state.travelPhase = "at_boat"
 			state.travelWaitUntil = os.time() + math.random(3, 6)
 			state.travelBoatNpcPos = nil
@@ -3913,6 +4892,41 @@ function BotSystem.initBot(player)
 	}
 end
 
+-- Give all 8 blessings to bots for free so they never lose equipment or inventory on death.
+-- Human players are NOT affected and must purchase blessings normally.
+function BotSystem.applyBotBlessings(player)
+	if not player or player:isRemoved() then return end
+	if not player.isBotPlayer or not player:isBotPlayer() then return end
+	for b = 1, 8 do
+		if not player:hasBlessing(b) then
+			player:addBlessing(b, 1)
+		end
+	end
+	player:sendBlessStatus()
+end
+
+-- Automatically promote bots reaching or having level 20+
+function BotSystem.checkBotPromotion(player)
+	if not player or player:isRemoved() then return end
+	if not player.isBotPlayer or not player:isBotPlayer() then return end
+	if player:getLevel() < 20 then return end
+
+	local voc = player:getVocation()
+	if not voc then return end
+
+	local promotion = voc:getPromotion()
+	local hasPromotion = player:kv():get("promoted")
+
+	if promotion and not hasPromotion and promotion:getId() ~= voc:getId() then
+		player:setVocation(promotion)
+		player:kv():set("promoted", true)
+		player:addMinorCharmEchoes(100)
+		player:getPosition():sendMagicEffect(CONST_ME_MAGIC_BLUE)
+		logger.info(string.format("[BotSystem] Auto-promoted %s to %s at level %d!",
+			player:getName(), promotion:getName(), player:getLevel()))
+	end
+end
+
 function BotSystem.activateBot(player, opts)
 	opts = opts or {}
 	local guid = player:getGuid()
@@ -3923,15 +4937,19 @@ function BotSystem.activateBot(player, opts)
 	local state = BotState[guid]
 	BotActive[guid] = true
 
+	-- Ensure bot has permanent blessings
+	BotSystem.applyBotBlessings(player)
+
+	-- Auto-promote if level >= 20
+	BotSystem.checkBotPromotion(player)
+
 	-- Teleport to city temple at correct walk z-level unless relogging at training statue
 	local town = player:getTown()
 	if opts.fromTraining and opts.relogPos then
 		player:teleportTo(Position(opts.relogPos.x, opts.relogPos.y, opts.relogPos.z))
 	elseif town then
-		local townId = town:getId()
-		local templePos = town:getTemplePosition()
-		local walkZ = CITY_WALK_Z[townId] or templePos.z
-		player:teleportTo(Position(templePos.x, templePos.y, walkZ))
+		local spawnPos = BotSystem.getSpawnPosition(player)
+		player:teleportTo(spawnPos)
 	end
 
 	state.state = BOT_STATE.IDLE
@@ -4018,6 +5036,7 @@ function BotSystem.activateBot(player, opts)
 
 	-- Learn all spells for this vocation (attack + healing)
 	BotSystem.learnAllSpells(player)
+	pcall(function() player:save() end)
 
 	-- Equip best gear for level and vocation
 	BotSystem.equipBot(player)
@@ -4292,6 +5311,14 @@ function BotSystem.onBotDeath(player, killer, mostDamageKiller)
 		state.huntCooldownUntil = os.time() + 45
 		state.wantTravelAfterDeath = true
 	end
+
+	-- Re-apply 8 blessings upon temple respawn so bot remains fully protected
+	addEvent(function()
+		local p = Player(guid)
+		if p and not p:isRemoved() then
+			BotSystem.applyBotBlessings(p)
+		end
+	end, 3500)
 end
 
 function BotSystem.onBotAdvance(player, skill, oldLevel, newLevel)
@@ -4319,6 +5346,17 @@ function BotSystem.onBotAdvance(player, skill, oldLevel, newLevel)
 			BotSystem.beginHuntPhase(player, state, HUNT_PHASE.LEAVING)
 		end
 	end
+
+	-- Auto-promote if level >= 20
+	if newLevel >= 20 then
+		BotSystem.checkBotPromotion(player)
+	end
+
+	-- Learn all spells unlocked for the new level
+	BotSystem.learnAllSpells(player)
+
+	-- Auto-upgrade equipment progression
+	BotSystem.checkEquipmentUpgrade(player, state)
 end
 
 BotSystem.SKILL_TARGETS_BY_LEVEL = {
@@ -4739,7 +5777,7 @@ end
 
 -- Full Hard Reset: behaves as if the server shut down, wiped all bot data/state, and booted fresh at Level 8
 function BotSystem.hardResetAllBots(initiatorPlayer)
-	logger.info("[BotReset] Executing full HARD RESET of all bots (wiping DB & memory state to fresh Level 8)...")
+	logger.info("[BotReset] Executing full HARD RESET: cleaning map, wiping mortes/mensagens/relacionamentos and resetting all players & bots to fresh Level 8...")
 
 	-- 1. Cancel any pending offline training relogs and bring offline bots back online first
 	for guid, entry in pairs(BotOfflineTraining or {}) do
@@ -4759,12 +5797,51 @@ function BotSystem.hardResetAllBots(initiatorPlayer)
 	end
 	_lastSpeakerBroadcastHandled = {}
 
-	-- 3. Wipe DB persistence, reservations, items, and reset players table to fresh Level 8
+	-- 3. Limpar mapa (remover todos os itens jogados no chão no mundo inteiro)
+	local cleanedItems = 0
+	pcall(function() cleanedItems = cleanMap() or 0 end)
+	logger.info(string.format("[BotReset] Map cleaned (%d items purged from the ground).", cleanedItems))
+
+	-- 4. Reiniciar tabelas de mortes, mensagens da IA, relacionamentos sociais e conflitos
+	pcall(function() db.query("DELETE FROM `player_deaths`") end)
+	pcall(function() db.query("DELETE FROM `player_kills`") end)
+	pcall(function() db.query("DELETE FROM `bot_audit_chats`") end)
+	pcall(function() db.query("DELETE FROM `bot_relationships`") end)
+	pcall(function() db.query("DELETE FROM `bot_conflict_events`") end)
+	pcall(function() db.query("DELETE FROM `bot_death_events`") end)
+	pcall(function() db.query("DELETE FROM `bot_nav_events`") end)
 	pcall(function() db.query("DELETE FROM `bot_state_persistence`") end)
-	pcall(function() db.query("UPDATE `bot_startup_config` SET `config_value` = '0' WHERE `config_key` = 'should_restore_states'") end)
 	pcall(function() db.query("DELETE FROM `bot_macro_states`") end)
-	pcall(function() db.query("DELETE FROM `player_items` WHERE `player_id` IN (SELECT `id` FROM `players` WHERE `account_id` = 65000 OR `name` LIKE 'Bot %')") end)
-	pcall(function() db.query("DELETE FROM `player_depotitems` WHERE `player_id` IN (SELECT `id` FROM `players` WHERE `account_id` = 65000 OR `name` LIKE 'Bot %')") end)
+	pcall(function() db.query("DELETE FROM `bot_active_players`") end)
+	pcall(function() db.query("UPDATE `bot_startup_config` SET `config_value` = '0' WHERE `config_key` = 'should_restore_states'") end)
+
+	-- 5. Limpar mapa/casas/mercado (tile_store, houses, market_offers)
+	pcall(function() db.query("DELETE FROM `tile_store`") end)
+	pcall(function() db.query("UPDATE `houses` SET `owner` = 0, `paid` = 0, `warnings` = 0") end)
+	pcall(function() db.query("DELETE FROM `house_lists`") end)
+	pcall(function() db.query("DELETE FROM `market_offers`") end)
+	pcall(function() db.query("DELETE FROM `market_history`") end)
+	pcall(function() db.query("DELETE FROM `guildwar_kills`") end)
+	pcall(function() db.query("DELETE FROM `guild_wars`") end)
+	pcall(function() db.query("DELETE FROM `guild_invites`") end)
+
+	-- 6. Limpar inventários, depósitos e históricos de todos os players e bots (preserva apenas samples id <= 7)
+	pcall(function() db.query("DELETE FROM `player_items` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_depotitems` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_inboxitems` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_rewards` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_stash` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_storage` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_spells` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_wheeldata` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_charms` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_bosstiary` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_prey` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `player_taskhunt` WHERE `player_id` > 7") end)
+	pcall(function() db.query("DELETE FROM `forge_history`") end)
+	pcall(function() db.query("DELETE FROM `daily_reward_history`") end)
+
+	-- 7. Resetar stats de todos os players e bots no banco para nível inicial (Level 8 / Level 1)
 	pcall(function()
 		db.query(
 			"UPDATE `players` SET `level` = 8, `experience` = 4200, `health` = 185, `healthmax` = 185, "
@@ -4776,50 +5853,95 @@ function BotSystem.hardResetAllBots(initiatorPlayer)
 			.. "`skill_dist` = 10, `skill_dist_tries` = 0, "
 			.. "`skill_shielding` = 10, `skill_shielding_tries` = 0, "
 			.. "`skill_fishing` = 10, `skill_fishing_tries` = 0, "
-			.. "`cap` = 470, `soul` = 100, `stamina` = 2520, "
-			.. "`offlinetraining_time` = 43200, `offlinetraining_skill` = -1 "
-			.. "WHERE `account_id` = 65000 OR `name` LIKE 'Bot %'"
+			.. "`cap` = 470, `soul` = 100, `stamina` = 2520, `balance` = 500, "
+			.. "`blessings1` = 0, `blessings2` = 0, `blessings3` = 0, `blessings4` = 0, "
+			.. "`blessings5` = 0, `blessings6` = 0, `blessings7` = 0, `blessings8` = 0, "
+			.. "`offlinetraining_time` = 43200, `offlinetraining_skill` = -1, `lookaddons` = 0 "
+			.. "WHERE `id` > 7 AND `group_id` < 3"
 		)
 	end)
 
-	-- 4. Reset every active bot in memory and re-run fresh startup activation
-	local count = 0
-	for _, p in ipairs(Game.getPlayers()) do
-		if p:isBotPlayer() and not p:isRemoved() then
-			local guid = p:getGuid()
-			BotPlayers[guid] = p
+	-- 8. Teleportar todos no DB para o templo natal da sua respectiva cidade
+	pcall(function()
+		db.query("UPDATE `players` p JOIN `towns` t ON p.`town_id` = t.`id` SET p.`posx` = t.`posx`, p.`posy` = t.`posy`, p.`posz` = t.`posz` WHERE p.`id` > 7 AND p.`group_id` < 3")
+	end)
 
-			if p.stopWalk then p:stopWalk() end
-			p:setTarget(nil)
-			if p.setFollowCreature then p:setFollowCreature(nil) end
-
-			-- Clear inventory slots (including backpack and any looted items inside)
-			for slot = CONST_SLOT_FIRST, CONST_SLOT_LAST do
-				local item = p:getSlotItem(slot)
-				if item then
-					pcall(function() item:remove() end)
+	-- 9. Copiar itens iniciais de samples no banco para jogadores humanos
+	pcall(function()
+		local humanRes = db.storeQuery("SELECT `id`, `vocation` FROM `players` WHERE `id` > 7 AND `group_id` < 3 AND `name` NOT LIKE 'Bot %'")
+		if humanRes then
+			repeat
+				local hId = Result.getNumber(humanRes, "id")
+				local hVoc = Result.getNumber(humanRes, "vocation")
+				local sampleId = 5
+				if hVoc == 1 or hVoc == 5 then sampleId = 2
+				elseif hVoc == 2 or hVoc == 6 then sampleId = 3
+				elseif hVoc == 3 or hVoc == 7 then sampleId = 4
+				elseif hVoc == 4 or hVoc == 8 then sampleId = 5
+				elseif hVoc == 0 then sampleId = 1
 				end
-			end
+				db.query(string.format("INSERT INTO `player_items` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) SELECT %d, `pid`, `sid`, `itemtype`, `count`, `attributes` FROM `player_items` WHERE `player_id` = %d", hId, sampleId))
+			until not Result.next(humanRes)
+			Result.free(humanRes)
+		end
+	end)
 
-			-- Reset level, experience, HP, mana, capacity, skills, and magic level
-			p:setLevel(8)
-			p:setMaxHealth(185)
-			p:setHealth(185)
-			p:setMaxMana(90)
-			p:setMana(90)
-			if p.setCapacity then
-				pcall(function() p:setCapacity(47000) end)
+	-- 10. Resetar todas as entidades ativas em memória (jogadores e bots)
+	local count = 0
+	local playersToReset = {}
+	for _, p in ipairs(Game.getPlayers()) do
+		if not p:isRemoved() then
+			local guid = p:getGuid()
+			if guid > 7 and (not p:getGroup() or p:getGroup():getId() < 3) then
+				table.insert(playersToReset, p)
 			end
-			p:setMagicLevel(0)
-			p:setSkillLevel(SKILL_FIST, 10)
-			p:setSkillLevel(SKILL_CLUB, 10)
-			p:setSkillLevel(SKILL_SWORD, 10)
-			p:setSkillLevel(SKILL_AXE, 10)
-			p:setSkillLevel(SKILL_DISTANCE, 10)
-			p:setSkillLevel(SKILL_SHIELD, 10)
-			p:setSkillLevel(SKILL_FISHING, 10)
+		end
+	end
 
-			-- Preserve debug flags across reset
+	for _, p in ipairs(playersToReset) do
+		local guid = p:getGuid()
+
+		if p.stopWalk then p:stopWalk() end
+		p:setTarget(nil)
+		if p.setFollowCreature then p:setFollowCreature(nil) end
+
+		-- Limpar slots do inventário
+		for slot = CONST_SLOT_FIRST, CONST_SLOT_LAST do
+			local item = p:getSlotItem(slot)
+			if item then
+				pcall(function() item:remove() end)
+			end
+		end
+
+		-- Resetar atributos para level 8
+		p:setLevel(8)
+		p:setMaxHealth(185)
+		p:setHealth(185)
+		p:setMaxMana(90)
+		p:setMana(90)
+		if p.setCapacity then
+			pcall(function() p:setCapacity(47000) end)
+		end
+		p:setMagicLevel(0)
+		p:setSkillLevel(SKILL_FIST, 10)
+		p:setSkillLevel(SKILL_CLUB, 10)
+		p:setSkillLevel(SKILL_SWORD, 10)
+		p:setSkillLevel(SKILL_AXE, 10)
+		p:setSkillLevel(SKILL_DISTANCE, 10)
+		p:setSkillLevel(SKILL_SHIELD, 10)
+		p:setSkillLevel(SKILL_FISHING, 10)
+
+		-- Teleportar para o templo natal
+		local town = p:getTown()
+		if town then
+			local tPos = town:getTemplePosition()
+			if tPos then
+				p:teleportTo(tPos)
+			end
+		end
+
+		if p:isBotPlayer() then
+			BotPlayers[guid] = p
 			local prevVerbose = BotState[guid] and BotState[guid].verboseLog or false
 			local prevAutoVerbose = BotState[guid] and BotState[guid].verboseLogAutoEnabled or false
 			BotState[guid] = nil
@@ -4829,12 +5951,19 @@ function BotSystem.hardResetAllBots(initiatorPlayer)
 				BotState[guid].verboseLog = prevVerbose
 				BotState[guid].verboseLogAutoEnabled = prevAutoVerbose
 			end
-
 			count = count + 1
+		else
+			-- Jogador humano: dar mochila inicial e ferramentas
+			local bp = p:addItem(2854, 1, false, CONST_SLOT_BACKPACK)
+			if bp then
+				p:addItem(3457, 1, false) -- Rope
+				p:addItem(3456, 1, false) -- Shovel
+			end
+			p:sendTextMessage(MESSAGE_ADMINISTRATOR, "O servidor foi reiniciado (Hard Reset). Seu personagem retornou ao templo no nível 8.")
 		end
 	end
 
-	logger.info(string.format("[BotReset] Full HARD RESET completed for %d online bots.", count))
+	logger.info(string.format("[BotReset] Full HARD RESET completed: map clean, %d online entities reset to fresh Level 8.", count))
 	return count
 end
 
@@ -4913,10 +6042,8 @@ function BotSystem.thinkEvent(guid)
 							state.cavebotCommand = nil
 						end
 					elseif source == "hunt" and result == "failed" then
-						-- Hunt z-transition failed — skip the current waypoint
-						logger.warn("[Bot:" .. player:getName() .. "] HUNTING floor change FAILED, skipping waypoint "
-							.. (state.huntWaypointIdx or "?"))
-						BotSystem.skipHuntWaypoint(player, state, "z-transition failed")
+						-- Hunt z-transition failed — attempt failsafe relocation or recovery
+						BotSystem.handleHuntFloorChangeFailed(player, state)
 					end
 					-- For "completed" during hunt: normal AI will run and navigateToHuntWaypoint
 					-- will see the z matches and proceed with same-z pathfinding
@@ -4962,11 +6089,16 @@ function BotSystem.thinkEvent(guid)
 			end
 		end
 
-		-- Periodic upkeep: Paladin ammo maintenance & Mage mushroom/food regeneration
+		-- Periodic upkeep: Paladin ammo maintenance, Bot food regen, Virtual Potions & Haste
+		BotSystem.checkBotPotions(player, state)
+		if player:isWalking() then
+			BotSystem.checkHaste(player, state)
+		end
+
 		if not state.lastUpkeepCheck or (now - state.lastUpkeepCheck) >= 2 then
 			state.lastUpkeepCheck = now
 			BotSystem.checkPaladinAmmo(player, state)
-			BotSystem.checkMageFoodAndRegen(player, state)
+			BotSystem.checkBotFoodAndRegen(player, state)
 		end
 
 		-- Execucao da Inteligencia Artificial nativa por estado
@@ -4984,6 +6116,10 @@ function BotSystem.thinkEvent(guid)
 			BotSystem.doFlee(player, state, state.attackerId and Creature(state.attackerId))
 		elseif state.state == BOT_STATE.TRAVELING then
 			BotSystem.doTraveling(player, state)
+		elseif state.state == BOT_STATE.PK_ATTACK then
+			BotSystem.doPKAttack(player, state)
+		elseif state.state == BOT_STATE.PARTY then
+			BotSystem.doPartyFollow(player, state)
 		end
 	end)
 
@@ -5393,42 +6529,153 @@ function BotSystem.doDwelling(player, state)
 end
 
 -- ============================================================================
--- TRAVELING State: inter-city travel
+-- TRAVELING State: inter-city travel via Temple
 -- ============================================================================
 
-function BotSystem.startTravel(player, state)
-	local town = player:getTown()
-	if not town then return end
-	local townId = town:getId()
-	local destinations = TRAVEL_DESTINATIONS[townId]
-	if not destinations or #destinations == 0 then return end
-
-	local destTownId = destinations[math.random(1, #destinations)]
+function BotSystem.executeTempleTeleport(player, state, destTownId)
 	local destTown = Town(destTownId)
-	if not destTown then return end
-
-	if math.random(1, 3) == 1 then
-		BotSystem.sayRandom(player, state, "travel")
+	if not destTown then
+		state.state = BOT_STATE.IDLE
+		state.travelDestTownId = nil
+		state.travelTempleTarget = nil
+		return false
 	end
 
+	local destTemplePos = BotSystem.getTownTemplePos(destTownId)
+	local curPos = player:getPosition()
+
+	pcall(function() curPos:sendMagicEffect(CONST_ME_TELEPORT) end)
+	player:teleportTo(destTemplePos)
+	pcall(function() destTemplePos:sendMagicEffect(CONST_ME_TELEPORT) end)
+
+	player:setTown(destTown)
+	if db and db.botAsyncQuery then
+		db.botAsyncQuery(string.format("UPDATE `players` SET `town_id` = %d WHERE `id` = %d", destTownId, player:getGuid()))
+	end
+
+	state.travelDestTownId = nil
+	state.travelTempleTarget = nil
+	state.travelStuckCount = nil
+	state.travelStartTime = nil
 	state.walkTarget = nil
 	state.currentPOI = nil
+	state.cavebotCommand = nil
+	state.state = BOT_STATE.IDLE
 
-	BotSystem.castDebug(player, state, "TRAVEL: " .. town:getName() .. " -> " .. destTown:getName())
-	logger.info("[Bot] " .. player:getName() .. " traveling from " ..
-		town:getName() .. " to " .. destTown:getName())
+	logger.info(string.format("[BotTravel] %s reached Temple and was teleported to %s Temple (Town %d)!",
+		player:getName(), destTown:getName(), destTownId))
+	return true
+end
 
-	-- Use proper boat travel: walk to boat -> say hi -> wait -> teleport -> walk from boat
-	BotSystem.startCavebotTravel(player, state, destTownId, destTown:getName())
+function BotSystem.startTempleTravel(player, state, destTownId, reason)
+	if not destTownId then return false end
+	local destTown = Town(destTownId)
+	if not destTown then return false end
+
+	-- Release any active hunt script reservation
+	if state.huntScriptId then
+		BotHuntData.releaseHunt(state.huntScriptId, player:getGuid())
+		state.huntScriptId = nil
+	end
+	state.pendingHuntAfterTravel = nil
+	state.cavebotCommand = nil
+	state.pendingPartyWith = nil
+	state.invadedRefusalRival = nil
+
+	local currentTownId = BotSystem.getActualBotTown(player)
+	local curTemplePos = BotSystem.getTownTemplePos(currentTownId)
+	local pos = player:getPosition()
+	local dist = math.max(math.abs(pos.x - curTemplePos.x), math.abs(pos.y - curTemplePos.y))
+
+	-- If already at current temple, teleport immediately and restart hunt search cycle
+	if dist <= 2 and pos.z == curTemplePos.z then
+		BotSystem.executeTempleTeleport(player, state, destTownId)
+		BotSystem.tryStartHunt(player, state)
+		return true
+	end
+
+	state.state = BOT_STATE.TRAVELING
+	state.travelDestTownId = destTownId
+	state.travelTempleTarget = curTemplePos
+	state.travelStuckCount = 0
+	state.travelStartTime = os.time()
+	state.walkTarget = curTemplePos
+	state.currentPOI = nil
+
+	local destName = destTown:getName()
+	logger.info(string.format("[BotTravel] %s (Town %d) walking to Temple to travel to %s (Town %d) [Reason: %s]",
+		player:getName(), currentTownId, destName, destTownId, tostring(reason or "Hunt Relocation")))
+
+	pcall(function()
+		if db and db.botAsyncQuery then
+			db.botAsyncQuery(string.format(
+				"REPLACE INTO `bot_macro_states` (`bot_name`, `current_action`, `target_destination`, `started_at`, `next_evaluation`, `reasoning`) VALUES (%s, 'TRAVEL', %s, NOW(), DATE_ADD(NOW(), INTERVAL 5 MINUTE), %s)",
+				db.escapeString(player:getName()),
+				db.escapeString("Temple -> " .. destName),
+				db.escapeString("Relocating via Temple: " .. tostring(reason or "Hunt"))
+			))
+		end
+	end)
+
+	BotSystem.goTo(player, curTemplePos, state)
+	return true
 end
 
 function BotSystem.doTraveling(player, state)
-	-- Legacy fallback: startTravel() now uses boat-based travel via startCavebotTravel(),
-	-- so this state should no longer be reached. If it is, recover gracefully.
-	logger.warn("[Bot] " .. player:getName() .. " in legacy TRAVELING state, recovering to IDLE")
-	state.state = BOT_STATE.IDLE
-	state.travelDestTownId = nil
-	state.travelUntil = nil
+	local destTownId = state.travelDestTownId
+	local templePos = state.travelTempleTarget
+	if not destTownId or not templePos then
+		state.state = BOT_STATE.IDLE
+		state.travelDestTownId = nil
+		state.travelTempleTarget = nil
+		return
+	end
+
+	local pos = player:getPosition()
+	local dist = math.max(math.abs(pos.x - templePos.x), math.abs(pos.y - templePos.y))
+
+	-- Safety timeout (90s): if stuck pathfinding in city, force teleport
+	local elapsed = os.time() - (state.travelStartTime or os.time())
+	if elapsed > 90 then
+		logger.warn(string.format("[BotTravel] %s took %ds to reach temple, forcing teleport to town %d",
+			player:getName(), elapsed, destTownId))
+		BotSystem.executeTempleTeleport(player, state, destTownId)
+		BotSystem.tryStartHunt(player, state)
+		return
+	end
+
+	-- Arrived at current city temple!
+	if dist <= 2 and pos.z == templePos.z then
+		BotSystem.executeTempleTeleport(player, state, destTownId)
+		-- Recomeca o ciclo de procura de hunt na nova cidade!
+		BotSystem.tryStartHunt(player, state)
+		return
+	end
+
+	-- Continue walking to local temple
+	if not player:isWalking() then
+		local ok = BotSystem.goTo(player, templePos, state)
+		if not ok then
+			state.travelStuckCount = (state.travelStuckCount or 0) + 1
+			if state.travelStuckCount >= 6 then
+				logger.warn(string.format("[BotTravel] %s stuck on way to temple, forcing teleport to town %d",
+					player:getName(), destTownId))
+				BotSystem.executeTempleTeleport(player, state, destTownId)
+				BotSystem.tryStartHunt(player, state)
+			end
+		else
+			state.travelStuckCount = 0
+		end
+	end
+end
+
+function BotSystem.startTravel(player, state)
+	local currentTownId = BotSystem.getActualBotTown(player)
+	local destinations = TRAVEL_DESTINATIONS[currentTownId]
+	if not destinations or #destinations == 0 then return end
+
+	local destTownId = destinations[math.random(1, #destinations)]
+	BotSystem.startTempleTravel(player, state, destTownId, "Idle Wander")
 end
 
 -- ============================================================================
@@ -5748,6 +6995,13 @@ function BotSystem.findZTransitions(centerPos, radius, goDown)
 					and not tile:hasFlag(TILESTATE_FLOORCHANGE_DOWN) then
 					table.insert(results, { pos = checkPos, type = "stairs", dist = d })
 				end
+				-- Check downward ramps/stairs (in Tibia, the ramp/stair item is often placed on z+1)
+				if goDown then
+					local downTile = Tile(Position(checkPos.x, checkPos.y, checkPos.z + 1))
+					if downTile and downTile:hasFlag(TILESTATE_FLOORCHANGE) then
+						table.insert(results, { pos = checkPos, type = "stairs", dist = d })
+					end
+				end
 				-- Check closed shovel/pick holes (going DOWN only)
 				if goDown then
 					local holeItem, _ = BotSystem.findClosedShovelHole(tile)
@@ -6050,9 +7304,9 @@ function BotSystem.doAttackCreature(player, state, target)
 		player:setTarget(target)
 	end
 
-	-- Ensure mana
+	-- Ensure mana via virtual potions
 	if player:getMana() < player:getMaxMana() * 0.3 then
-		player:addMana(player:getMaxMana())
+		BotSystem.checkBotPotions(player, state)
 	end
 
 	-- Also cast a spell for extra damage (requires LOS)
@@ -6078,7 +7332,7 @@ function BotSystem.doAttackCreature(player, state, target)
 	end
 end
 
-function BotSystem.tryOpenDoors(player, targetPos)
+function BotSystem.tryOpenDoors(player, targetPos, state)
 	local pos = player:getPosition()
 	-- Direction toward target
 	local dx = targetPos.x - pos.x
@@ -6086,8 +7340,11 @@ function BotSystem.tryOpenDoors(player, targetPos)
 	local ndx = dx > 0 and 1 or (dx < 0 and -1 or 0)
 	local ndy = dy > 0 and 1 or (dy < 0 and -1 or 0)
 
-	-- Check tiles in the direction of the target (primary + orthogonal)
+	-- Check tiles in the direction of the target (primary + orthogonal + target itself if adjacent)
 	local tilesToCheck = {}
+	if math.abs(dx) <= 1 and math.abs(dy) <= 1 and targetPos.z == pos.z then
+		table.insert(tilesToCheck, Position(targetPos.x, targetPos.y, targetPos.z))
+	end
 	if ndx ~= 0 or ndy ~= 0 then
 		table.insert(tilesToCheck, Position(pos.x + ndx, pos.y + ndy, pos.z))
 	end
@@ -6098,6 +7355,10 @@ function BotSystem.tryOpenDoors(player, targetPos)
 		table.insert(tilesToCheck, Position(pos.x, pos.y + ndy, pos.z))
 	end
 
+	local guid = player:getGuid()
+	local botState = state or (BotState and guid and BotState[guid]) or nil
+	local huntId = botState and botState.huntScriptId or 0
+
 	for _, tilePos in ipairs(tilesToCheck) do
 		local tile = Tile(tilePos)
 		if tile then
@@ -6105,12 +7366,64 @@ function BotSystem.tryOpenDoors(player, targetPos)
 			if items then
 				for _, item in ipairs(items) do
 					local itemId = item:getId()
+
+					-- 1. Check LOCKED_KEY_DOORS (requires a physical key with matching actionId in backpack)
+					local openKeyDoorId = LOCKED_KEY_DOORS and LOCKED_KEY_DOORS[itemId]
+					if openKeyDoorId then
+						local reqKey = (item.getActionId and item:getActionId()) or (item.actionid) or 0
+						if reqKey > 0 then
+							local hasKey = BotSystem.playerHasKey(player, reqKey)
+							if hasKey then
+								item:transform(openKeyDoorId)
+								tilePos:sendMagicEffect(CONST_ME_MAGIC_YELLOW)
+								player:say("*unlocks door with key " .. reqKey .. "*", TALKTYPE_MONSTER_SAY)
+								logger.info(string.format("[BotKey] %s destrancou porta em (%d,%d,%d) usando Key #%d!",
+									player:getName(), tilePos.x, tilePos.y, tilePos.z, reqKey))
+								return true
+							else
+								logger.warn(string.format("[BotKey] %s bloqueado por porta trancada (Key #%d) em (%d,%d,%d)!",
+									player:getName(), reqKey, tilePos.x, tilePos.y, tilePos.z))
+								BotSystem.recordImpediment(player, huntId, nil, nil, "MISSING_KEY",
+									"Key #" .. reqKey,
+									string.format("Bloqueado por porta trancada em (%d,%d,%d) que exige Key #%d", tilePos.x, tilePos.y, tilePos.z, reqKey),
+									tilePos)
+								return false
+							end
+						else
+							-- Locked door sprite on map without actionId
+							item:transform(openKeyDoorId)
+							return true
+						end
+					end
+
+					-- 2. Check normal closed doors
 					local openId = CLOSED_TO_OPEN_DOOR[itemId]
 					if openId then
 						item:transform(openId)
 						logger.info("[Bot] " .. player:getName() ..
 							" opened door at (" .. tilePos.x .. "," .. tilePos.y .. "," .. tilePos.z .. ")")
 						return true
+					end
+
+					-- 3. Check LevelDoorTable (only open if bot meets the level requirement)
+					local levelOpenId = LEVEL_DOOR_MAP and LEVEL_DOOR_MAP[itemId]
+					if levelOpenId then
+						local aid = (item.getActionId and item:getActionId()) or (item.actionid) or 0
+						local reqLevel = (aid > 1000) and (aid - 1000) or 0
+						if player:getLevel() >= reqLevel then
+							item:transform(levelOpenId)
+							logger.info(string.format("[Bot] %s opened level door (req: %d, bot: %d) at (%d,%d,%d)",
+								player:getName(), reqLevel, player:getLevel(), tilePos.x, tilePos.y, tilePos.z))
+							return true
+						else
+							logger.info(string.format("[Bot] %s blocked by level door (req: %d, bot: %d) at (%d,%d,%d)",
+								player:getName(), reqLevel, player:getLevel(), tilePos.x, tilePos.y, tilePos.z))
+							BotSystem.recordImpediment(player, huntId, nil, nil, "LEVEL_DOOR",
+								"Level " .. reqLevel,
+								string.format("Bloqueado por Level Door (requer lvl %d, atual lvl %d) em (%d,%d,%d)", reqLevel, player:getLevel(), tilePos.x, tilePos.y, tilePos.z),
+								tilePos)
+							return false
+						end
 					end
 				end
 			end
@@ -6241,7 +7554,7 @@ function BotSystem.checkCaveEncounter(player, state)
 					local cTile = Tile(cpos)
 					if cTile and not cTile:hasFlag(TILESTATE_PROTECTIONZONE) then
 						-- Skip if they are already in the same party
-						if not (myParty and myParty:isMember(creature)) then
+						if not (myParty and creature:getParty() and creature:getParty() == myParty) then
 							-- Skip if we are already targeting them in PK
 							if not (state.state == BOT_STATE.PK_ATTACK and state.pkTarget == creature:getId()) then
 								rival = creature
@@ -6256,21 +7569,99 @@ function BotSystem.checkCaveEncounter(player, state)
 
 	if not rival then return false end
 
-	-- Rival found! Initiate NotJev dispute evaluation
-	state.caveDisputeInFlight = true
+	-- Rival found! Check relationship & previous interaction
 	local myGuid = player:getGuid()
 	local rivalGuid = rival:getGuid()
 	local rivalName = rival:getName()
 	local rivalLevel = rival:getLevel()
 	local rivalIsPlayer = not (rival.isBotPlayer and rival:isBotPlayer())
+
+	-- Mutual pair lock: only one bot in the pair initiates the dispute encounter
+	local pairKey = string.format("%d_%d", math.min(myGuid, rivalGuid), math.max(myGuid, rivalGuid))
+	_G.ActiveCaveDisputes = _G.ActiveCaveDisputes or {}
+	if _G.ActiveCaveDisputes[pairKey] and (now - _G.ActiveCaveDisputes[pairKey]) < 60 then
+		return false
+	end
+	_G.ActiveCaveDisputes[pairKey] = now
+
 	local script = state.huntScriptId and BotHuntData.scripts[state.huntScriptId]
 	local caveName = script and script.name or "Cave"
 	local arch = BotSystem.getBotArchetype(player, state)
 
+	local myName = player:getName()
+	local rel = BotSystem.getRelationship(myName, rivalName)
+	local isInvadedRefusal = (rel.huntState == "INVADED_AFTER_REFUSAL") or (state.invadedRefusalRival == rivalGuid)
+
+	-- If this was an invasion after warning, have a brief verbal argument in Default chat
+	if isInvadedRefusal then
+		player:say(string.format("Eu avisei no PV pra nao entrar aqui, %s!", rivalName), TALKTYPE_SAY)
+		addEvent(function()
+			local r = Player(rivalGuid)
+			if r and not r:isRemoved() then
+				r:say(string.format("Nao ligo %s, a cave e publica! Nao vou sair!", myName), TALKTYPE_SAY)
+			end
+		end, 700)
+	end
+
+	-- If cave is already a full duo party (2+ occupants), defend the cave against the 3rd intruder!
+	local occupants = (state.huntScriptId and BotHuntData.getOccupants(state.huntScriptId)) or {}
+	local isPartyCaveDefense = (myParty and #occupants >= 2 and not (rival:getParty() and rival:getParty() == myParty))
+	if isPartyCaveDefense then
+		player:say(string.format("Sai da nossa cave agora %s! Ja estamos em dupla, vaza ou vai tomar PK!", rivalName), TALKTYPE_SAY)
+		logger.info(string.format("[PartyDefense] %s and party DEFENDING cave %s against intruder %s!",
+			myName, caveName, rivalName))
+
+		state.caveDisputeCooldownUntil = now + 60
+
+		-- Both party members focus PK attack on the intruder
+		local members = myParty:getMembers()
+		for _, member in ipairs(members) do
+			local mState = BotState and BotState[member:getGuid()]
+			if mState and member:isBotPlayer() then
+				BotSystem.clearAllTasks(member, mState)
+				mState.state = BOT_STATE.PK_ATTACK
+				mState.pkTarget = rivalGuid
+				mState.pkStartTime = os.time()
+				mState.lastAttackTime = 0
+				mState.lastCombatProgress = os.time()
+				member:setTarget(rival)
+			end
+		end
+
+		-- Make intruder react
+		local rivalState = BotState and BotState[rivalGuid]
+		if rivalState and rival:isBotPlayer() then
+			local rPers = rivalState.personality or 2
+			if rPers <= 4 then
+				-- Flee and leave cave
+				rival:say("Calma mano, ja to saindo fora! Nao precisa pklizar!", TALKTYPE_SAY)
+				rivalState.caveDisputeCooldownUntil = os.time() + 600
+				if rivalState.huntScriptId then
+					BotHuntData.releaseHunt(rivalState.huntScriptId, rivalGuid)
+					rivalState.huntScriptId = nil
+				end
+				local curTown = BotSystem.getActualBotTown(rival)
+				local destTownId = (curTown == 8) and 6 or 8
+				BotSystem.startTempleTravel(rival, rivalState, destTownId, "Expelled from cave " .. caveName)
+			else
+				-- Bully fights back
+				rival:say("Vem os dois entao que eu deito a party inteira!", TALKTYPE_SAY)
+				BotSystem.clearAllTasks(rival, rivalState)
+				rivalState.state = BOT_STATE.PK_ATTACK
+				rivalState.pkTarget = myGuid
+				rivalState.pkStartTime = os.time()
+				rival:setTarget(player)
+			end
+		end
+		return true
+	end
+
+	state.caveDisputeInFlight = true
+
 	local payload = {
 		bot_profile = {
 			guid = myGuid,
-			name = player:getName(),
+			name = myName,
 			level = player:getLevel(),
 			vocation = player:getVocation():getName(),
 			personality = state.personality or 2,
@@ -6280,7 +7671,10 @@ function BotSystem.checkCaveEncounter(player, state)
 		rival_name = rivalName,
 		rival_level = rivalLevel,
 		rival_is_player = rivalIsPlayer,
-		cave_name = caveName
+		cave_name = caveName,
+		trigger_event = isInvadedRefusal and "Invasao desrespeitando aviso previo em PV" or "Entrou no respawn",
+		relationship_context = string.format("hunt_state: %s, afinidade: %d, notas: %s",
+			rel.huntState or "NONE", rel.affinity or 0, rel.notes or "")
 	}
 
 	BotSystem.asyncNodePost("/api/decision/dispute", payload, function(res)
@@ -6310,19 +7704,60 @@ function BotSystem.checkCaveEncounter(player, state)
 			if targetCreature and not targetCreature:isRemoved() then
 				p:setTarget(targetCreature)
 			end
-		elseif decision == "PARTY" then
-			logger.info(string.format("[CaveDispute] %s (lv%d) decided to PARTY with %s (lv%d) in %s (cooldown 15m).",
+
+			-- Make rival react immediately so they fight or flee rather than standing still!
+			local rivalPlayer = Player(rivalGuid)
+			local rivalState = BotState and BotState[rivalGuid]
+			if rivalPlayer and not rivalPlayer:isRemoved() and rivalState then
+				local rPers = rivalState.personality or 2
+				if rPers >= 4 then
+					-- Aggressive rival fights back!
+					rivalPlayer:say(string.format("Voce vai se arrepender de ter aberto skull em mim, %s!", p:getName()), TALKTYPE_SAY)
+					BotSystem.clearAllTasks(rivalPlayer, rivalState)
+					rivalState.state = BOT_STATE.PK_ATTACK
+					rivalState.pkTarget = myGuid
+					rivalState.pkStartTime = os.time()
+					rivalState.lastAttackTime = 0
+					rivalState.lastCombatProgress = os.time()
+					rivalPlayer:setTarget(p)
+				else
+					-- Cautious rival flees cave!
+					rivalPlayer:say("Calma mano, ja to saindo fora! Nao precisa pklizar!", TALKTYPE_SAY)
+					BotSystem.clearAllTasks(rivalPlayer, rivalState)
+					rivalState.state = BOT_STATE.FLEEING
+					rivalState.attackerId = myGuid
+					rivalState.fleeStartTime = os.time()
+					if rivalState.huntScriptId then
+						BotHuntData.releaseHunt(rivalState.huntScriptId, rivalGuid)
+						rivalState.huntScriptId = nil
+					end
+					local curTown = BotSystem.getActualBotTown(rivalPlayer)
+					local destTownId = (curTown == 8) and 6 or 8
+					BotSystem.startTempleTravel(rivalPlayer, rivalState, destTownId, "Expelled by PK " .. p:getName())
+				end
+			end
+		elseif decision == "PARTY" or decision == "SHARE" then
+			logger.info(string.format("[CaveDispute] %s (lv%d) agreed to PARTY/SHARE with %s (lv%d) in %s.",
 				p:getName(), p:getLevel(), rivalName, rivalLevel, caveName))
 			s.caveDisputeCooldownUntil = os.time() + cooldown
 			local targetCreature = Player(rivalGuid)
-			if targetCreature and not p:getParty() then
-				pcall(function() p:addPartyMember(targetCreature) end)
+			if targetCreature then
+				local party = p:getParty() or targetCreature:getParty()
+				if not party then
+					party = Party(p)
+				end
+				if party then
+					if p:getParty() ~= party then
+						pcall(function() party:addInvite(p) end)
+						pcall(function() party:addMember(p) end)
+					end
+					if targetCreature:getParty() ~= party then
+						pcall(function() party:addInvite(targetCreature) end)
+						pcall(function() party:addMember(targetCreature) end)
+					end
+					pcall(function() party:setSharedExperience(true) end)
+				end
 			end
-		elseif decision == "SHARE" then
-			logger.info(string.format("[CaveDispute] %s (lv%d) decided to SHARE cave %s with %s (15m cooldown).",
-				p:getName(), p:getLevel(), caveName, rivalName))
-			-- Aplica o cooldown rígido de 15 minutos: continuam caçando seus waypoints
-			s.caveDisputeCooldownUntil = os.time() + cooldown
 		elseif decision == "LEAVE" then
 			logger.info(string.format("[CaveDispute] %s (lv%d) decided to LEAVE cave %s to avoid %s.",
 				p:getName(), p:getLevel(), caveName, rivalName))
@@ -6331,7 +7766,20 @@ function BotSystem.checkCaveEncounter(player, state)
 				BotHuntData.releaseHunt(s.huntScriptId, p:getGuid())
 				s.huntScriptId = nil
 			end
-			BotSystem.tryStartHunt(p, s)
+			local curTown = BotSystem.getActualBotTown(p)
+			local destTownId = (curTown == 8) and 6 or 8
+			BotSystem.startTempleTravel(p, s, destTownId, "Expelled from cave " .. caveName)
+		end
+
+		if db and db.botAsyncQuery then
+			db.botAsyncQuery(string.format(
+				"INSERT INTO `bot_conflict_events` (`bot_a_name`, `bot_b_name`, `cave_name`, `escalation_level`, `outcome`) VALUES (%s, %s, %s, %d, %s)",
+				db.escapeString(p:getName()),
+				db.escapeString(rivalName),
+				db.escapeString(caveName),
+				tonumber(res.escalation_level) or (decision == "PK" and 5 or 2),
+				db.escapeString(decision)
+			))
 		end
 	end, function()
 		-- Fallback if service times out: apply 15m cooldown to avoid spamming
@@ -6504,6 +7952,7 @@ function BotSystem.doPKAttack(player, state)
 	end
 	BotSystem.doCastSpell(player, state, target)
 	BotSystem.chaseTarget(player, state, target)  -- chaseTarget handles z-pursuit
+	BotSystem.doHealing(player, state)
 end
 
 function BotSystem.exitPK(player, state)
@@ -6730,9 +8179,45 @@ function BotSystem.learnAllSpells(player)
 		end
 	end
 
-	-- Learn universal spells
-	player:learnSpell("exura")
-	player:learnSpell("exura vita")
+	local hasteSpells = BOT_HASTE_SPELLS and BOT_HASTE_SPELLS[baseVoc]
+	if hasteSpells then
+		for _, spell in ipairs(hasteSpells) do
+			player:learnSpell(spell.name)
+			count = count + 1
+		end
+	end
+
+	-- Universal spells
+	local universalSpells = {"exura", "exura gran", "exura vita", "utani hur", "utani gran hur", "exana pox"}
+	for _, name in ipairs(universalSpells) do
+		player:learnSpell(name)
+		count = count + 1
+	end
+
+	-- Vocation-specific support spells
+	if baseVoc == 1 then -- Sorcerer
+		player:learnSpell("utamo vita")
+		player:learnSpell("exana vita")
+		count = count + 2
+	elseif baseVoc == 2 then -- Druid
+		player:learnSpell("exura sio")
+		player:learnSpell("exura gran mas res")
+		player:learnSpell("utamo vita")
+		player:learnSpell("exana vita")
+		count = count + 4
+	elseif baseVoc == 3 then -- Paladin
+		player:learnSpell("exura san")
+		player:learnSpell("exura gran san")
+		player:learnSpell("utito tempo san")
+		count = count + 3
+	elseif baseVoc == 4 then -- Knight
+		player:learnSpell("exura ico")
+		player:learnSpell("exura med ico")
+		player:learnSpell("utito tempo")
+		player:learnSpell("exeta res")
+		player:learnSpell("utani tempo hur")
+		count = count + 5
+	end
 
 	logger.info("[Bot] " .. player:getName() .. " learned " .. count .. " spells (voc=" .. baseVoc .. ")")
 end
@@ -6856,10 +8341,10 @@ function BotSystem.equipBot(player)
 			.. " (lv=" .. level .. " voc=" .. baseVoc .. ")")
 	end
 
-	-- Run immediate upkeep for ammo / mushrooms
+	-- Run immediate upkeep for ammo / food
 	if state then
 		BotSystem.checkPaladinAmmo(player, state)
-		BotSystem.checkMageFoodAndRegen(player, state)
+		BotSystem.checkBotFoodAndRegen(player, state)
 	end
 end
 
@@ -6869,6 +8354,12 @@ function BotSystem.checkPaladinAmmo(player, state)
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
 	if baseVoc ~= 3 then return end
+
+	-- Cooldown of 30 seconds to prevent rapid-fire loops
+	local now = os.time()
+	if state and state.lastPaladinAmmoSpawn and (now - state.lastPaladinAmmoSpawn) < 30 then
+		return
+	end
 
 	local level = player:getLevel()
 	local guid = player:getGuid()
@@ -6894,11 +8385,12 @@ function BotSystem.checkPaladinAmmo(player, state)
 
 		-- Only spawn free ammo when completely OUT OF AMMO (totalCount == 0) for low-level (level <= 25)
 		if level <= 25 and totalCount == 0 then
+			if state then state.lastPaladinAmmoSpawn = now end
 			pcall(function() player:setCapacity(math.max(player:getCapacity(), 20000)) end)
 			if quiver and quiver:isContainer() then
 				quiver:addItem(ammoId, 100)
 			else
-				player:addItem(ammoId, 100)
+				player:addItem(ammoId, 100, false)
 			end
 			logger.info("[Bot:" .. player:getName() .. "] Ammo empty (0)! Spawned free 100x arrows (id=" .. ammoId .. ")")
 		elseif quiver and quiver:isContainer() and countInQuiver == 0 and totalCount > 0 then
@@ -6908,7 +8400,7 @@ function BotSystem.checkPaladinAmmo(player, state)
 				for i = 0, bp:getSize() - 1 do
 					local it = bp:getItem(i)
 					if it and it:getId() == ammoId then
-						it:moveTo(quiver)
+						pcall(function() it:moveTo(quiver) end)
 						break
 					end
 				end
@@ -6921,7 +8413,7 @@ function BotSystem.checkPaladinAmmo(player, state)
 		elseif level >= 25 then
 			spearId = 7378  -- Royal Spear
 		elseif level >= 20 then
-			spearId = 14251 -- Hunting Spear
+			spearId = 3347  -- Hunting Spear (ID 3347 in items.xml)
 		end
 
 		local currentWeapon = player:getSlotItem(CONST_SLOT_LEFT)
@@ -6930,10 +8422,18 @@ function BotSystem.checkPaladinAmmo(player, state)
 
 		-- Only spawn free spears when completely OUT OF WEAPONS (totalCount == 0) for low-level (level <= 25)
 		if level <= 25 and totalCount == 0 then
+			if state then state.lastPaladinAmmoSpawn = now end
 			pcall(function() player:setCapacity(math.max(player:getCapacity(), 50000)) end)
-			local ok = player:setSlotItem(CONST_SLOT_LEFT, spearId, 10)
-			if not ok then
-				player:addItem(spearId, 10)
+			local it = nil
+			pcall(function() it = player:addItem(spearId, 10, false, 1, CONST_SLOT_LEFT) end)
+			if not it then
+				local itEx = Game.createItem(spearId, 10)
+				if itEx then
+					local ok = pcall(function() itEx:moveToSlot(player, CONST_SLOT_LEFT) end)
+					if not ok then
+						pcall(function() itEx:remove() end)
+					end
+				end
 			end
 			logger.info("[Bot:" .. player:getName() .. "] Spears empty (0)! Spawned free 10x spears (id=" .. spearId .. ")")
 		elseif equippedCount == 0 and totalCount > 0 then
@@ -6943,7 +8443,7 @@ function BotSystem.checkPaladinAmmo(player, state)
 				for i = 0, bp:getSize() - 1 do
 					local it = bp:getItem(i)
 					if it and it:getId() == spearId then
-						it:moveTo(player, CONST_SLOT_LEFT)
+						pcall(function() it:moveToSlot(player, CONST_SLOT_LEFT) end)
 						break
 					end
 				end
@@ -6952,34 +8452,154 @@ function BotSystem.checkPaladinAmmo(player, state)
 	end
 end
 
--- Mage/Druid food supply & auto-eat:
--- Only spawns food when the bot is completely OUT OF FOOD (count == 0) AND has NO regeneration left.
-function BotSystem.checkMageFoodAndRegen(player, state)
-	local voc = player:getVocation()
-	local baseVoc = voc and voc:getBaseId() or 4
-	if baseVoc ~= 1 and baseVoc ~= 2 then return end
-
+-- Food supply & auto-eat for all bot vocations:
+-- Ensures bots maintain active HP/Mana regeneration without dropping items on the floor.
+function BotSystem.checkBotFoodAndRegen(player, state)
 	local cond = player:getCondition(CONDITION_REGENERATION, CONDITIONID_DEFAULT)
 	local regenTicks = cond and cond:getTicks() or 0
-	local mushroomCount = player:getItemCount(3725) or 0
 
-	-- 1. Free food spawn: only when out of food (0) AND regeneration has ended (<= 0)
-	if mushroomCount == 0 and regenTicks <= 0 then
-		player:addItem(3725, 10)
-		mushroomCount = 10
-		logger.info("[Bot:" .. player:getName() .. "] Food empty & no regen! Spawned 10x brown mushrooms")
+	-- If regeneration is missing or expiring in less than 60 seconds, feed for 20 minutes (1200s)
+	if regenTicks < 60000 then
+		player:feed(1200)
+		BotSystem.debugLog(state, "Food regen refreshed (ticks=" .. regenTicks .. " -> 1200s)")
+	end
+end
+
+-- Backward compatibility alias
+BotSystem.checkMageFoodAndRegen = BotSystem.checkBotFoodAndRegen
+
+-- Simulated Potion Recovery (Exclusively for Bots):
+-- Saves backpack capacity and slots while accurately simulating potion recovery per vocation & level tier.
+function BotSystem.checkBotPotions(player, state)
+	local now = os.time()
+	if state.lastPotionTime and (now - state.lastPotionTime) < 1 then return end
+
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	local level = player:getLevel()
+	local hp = player:getHealth()
+	local maxHp = player:getMaxHealth()
+	local mana = player:getMana()
+	local maxMana = player:getMaxMana()
+	local used = false
+
+	-- 1. Emergency Health Potion for Knights (hp < 50%)
+	if baseVoc == 4 and (hp / math.max(maxHp, 1)) < 0.5 then
+		local healAmount = (level >= 200 and math.random(850, 1150))
+			or (level >= 130 and math.random(750, 950))
+			or (level >= 80 and math.random(450, 650))
+			or (level >= 50 and math.random(280, 360))
+			or math.random(150, 220)
+		player:addHealth(healAmount)
+		used = true
 	end
 
-	-- 2. Auto-eat: only when regeneration expired or under 30s remaining
-	if regenTicks < 30000 and mushroomCount > 0 then
-		if player:removeItem(3725, 1) then
-			player:feed(264) -- 1 brown mushroom = 264 seconds of regeneration
+	-- 2. Mana Potion Recovery for all vocations (mana < 60%)
+	if not used and (mana / math.max(maxMana, 1)) < 0.6 then
+		if baseVoc == 1 or baseVoc == 2 then -- Sorcerer / Druid
+			local manaAmount = (level >= 130 and math.random(420, 580))
+				or (level >= 80 and math.random(170, 230))
+				or (level >= 50 and math.random(130, 170))
+				or math.random(80, 120)
+			player:addMana(manaAmount)
+			used = true
+		elseif baseVoc == 3 then -- Paladin (Mana / Spirit potions)
+			if level >= 130 then
+				player:addHealth(400)
+				player:addMana(250)
+			elseif level >= 80 then
+				player:addHealth(300)
+				player:addMana(150)
+			elseif level >= 50 then
+				player:addMana(math.random(130, 170))
+			else
+				player:addMana(math.random(80, 120))
+			end
+			used = true
+		elseif baseVoc == 4 then -- Knight
+			player:addMana(math.random(80, 120))
+			used = true
+		end
+	end
+
+	if used then
+		state.lastPotionTime = now
+		player:getPosition():sendMagicEffect(CONST_ME_MAGIC_BLUE)
+		if math.random(1, 6) == 1 then
+			player:say("Aaaah...", TALKTYPE_MONSTER_SAY)
 		end
 	end
 end
 
--- Select best available attack spell for the given target
--- Returns the spell table entry or nil
+-- Permanent Haste while moving for bots lv 20+
+function BotSystem.checkHaste(player, state)
+	if not player:isWalking() then return end
+	local level = player:getLevel()
+	if level < 20 then return end
+	if player:hasCondition(CONDITION_HASTE) then return end
+
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	local hasteSpells = BOT_HASTE_SPELLS[baseVoc]
+	if not hasteSpells then return end
+
+	local now = os.time()
+	if state.lastHasteTime and (now - state.lastHasteTime) < 2 then return end
+
+	for _, s in ipairs(hasteSpells) do
+		if level >= s.level then
+			state.lastHasteTime = now
+			player:say(s.name, TALKTYPE_MONSTER_SAY)
+			player:getPosition():sendMagicEffect(CONST_ME_MAGIC_RED)
+			local cond = Condition(CONDITION_HASTE)
+			cond:setParameter(CONDITION_PARAM_TICKS, 33000)
+			cond:setParameter(CONDITION_PARAM_SPEED, s.speed)
+			player:addCondition(cond)
+			break
+		end
+	end
+end
+
+-- Druid Party Support: focus exura sio exclusively on party leader
+function BotSystem.checkPartySio(player, state)
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	if baseVoc ~= 2 then return false end
+	local level = player:getLevel()
+	if level < 35 then return false end
+
+	local party = player:getParty()
+	if not party then return false end
+
+	local leader = party:getLeader()
+	if not leader or leader:getId() == player:getId() then return false end
+
+	local lPos = leader:getPosition()
+	local pos = player:getPosition()
+	if lPos.z ~= pos.z then return false end
+
+	local dist = math.max(math.abs(pos.x - lPos.x), math.abs(pos.y - lPos.y))
+	if dist > 8 then return false end
+
+	local lHp = leader:getHealth()
+	local lMaxHp = leader:getMaxHealth()
+	if (lHp / math.max(lMaxHp, 1)) >= 0.75 then return false end
+
+	local now = os.time()
+	if state.lastSioTime and (now - state.lastSioTime) < 1 then return false end
+
+	state.lastSioTime = now
+	player:say('exura sio "' .. leader:getName() .. '"', TALKTYPE_MONSTER_SAY)
+	lPos:sendMagicEffect(CONST_ME_MAGIC_BLUE)
+
+	local magLevel = player:getMagicLevel()
+	local healAmount = math.floor(350 + (level * 2) + (magLevel * 7))
+	leader:addHealth(healAmount)
+	BotSystem.debugLog(state, "SIO: healed party leader " .. leader:getName() .. " for " .. healAmount .. " HP")
+	return true
+end
+
+-- Select best available attack spell for the given target (AoE vs Single-target aware)
 function BotSystem.selectAttackSpell(player, state, target)
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
@@ -6994,7 +8614,6 @@ function BotSystem.selectAttackSpell(player, state, target)
 
 	-- Determine if target is a player (for PvP-only spells like SD rune)
 	local targetIsPlayer = Player(target:getId()) ~= nil
-	-- For monsters: SD rune usable only if monster HP >= 5x bot's max HP AND not immune to death
 	local targetIsStrongMonster = false
 	if not targetIsPlayer then
 		local mon = Monster(target:getId())
@@ -7002,8 +8621,6 @@ function BotSystem.selectAttackSpell(player, state, target)
 			local monHp = mon:getMaxHealth()
 			local botHp = Player(player:getId()) and player:getMaxHealth() or 1
 			if monHp >= botHp * 5 then
-				-- Check death immunity via monster type element map
-				-- getElementList() returns table[combatType] = absorbPercent
 				local mtype = mon:getType()
 				local elementMap = mtype and mtype:getElementList() or nil
 				local deathAbsorb = elementMap and elementMap[COMBAT_DEATHDAMAGE] or 0
@@ -7014,19 +8631,79 @@ function BotSystem.selectAttackSpell(player, state, target)
 		end
 	end
 
-	-- Collect all available spells (off cooldown, in range, level met)
+	-- Count nearby monsters to decide between AoE and Single-Target
+	local monstersAround = 0
+	local spectators = Game.getSpectators(pos, false, false, 2, 2, 2, 2)
+	for _, spec in ipairs(spectators) do
+		if spec:isMonster() and spec:getHealth() > 0 then
+			monstersAround = monstersAround + 1
+		end
+	end
+	local useAoE = monstersAround >= 2
+
+	-- Emergency / special buffs:
+	-- Mages: utamo vita if HP < 40% or facing PvP
+	if (baseVoc == 1 or baseVoc == 2) and level >= 14 then
+		local hpRatio = player:getHealth() / math.max(player:getMaxHealth(), 1)
+		if (hpRatio < 0.40 or targetIsPlayer) and not player:hasCondition(CONDITION_MANASHIELD) then
+			local cdKey = "spellCd_utamo_vita"
+			if not state[cdKey] or now >= state[cdKey] then
+				state[cdKey] = now + 14
+				player:say("utamo vita", TALKTYPE_MONSTER_SAY)
+				pos:sendMagicEffect(CONST_ME_MAGIC_BLUE)
+				local cond = Condition(CONDITION_MANASHIELD)
+				cond:setParameter(CONDITION_PARAM_TICKS, 60000)
+				player:addCondition(cond)
+			end
+		end
+	end
+
+	-- Knights: utito tempo if surrounded by 3+ monsters and HP > 70%
+	if baseVoc == 4 and level >= 90 and monstersAround >= 3 then
+		local hpRatio = player:getHealth() / math.max(player:getMaxHealth(), 1)
+		if hpRatio > 0.70 then
+			local cdKey = "spellCd_utito_tempo"
+			if not state[cdKey] or now >= state[cdKey] then
+				state[cdKey] = now + 10
+				player:say("utito tempo", TALKTYPE_MONSTER_SAY)
+				pos:sendMagicEffect(CONST_ME_BLOODYSTEPS)
+			end
+		end
+	end
+
+	-- Filter spells preferring AoE when 2+ monsters, or single-target strikes when 1 monster
 	local available = {}
 	for i = 1, #spells do
 		local spell = spells[i]
 		if level >= spell.level then
-			-- pvpOnly spells (SD rune): only vs players or strong non-immune monsters
 			if spell.pvpOnly and not targetIsPlayer and not targetIsStrongMonster then
-				-- skip this spell
+				-- skip
 			else
 				local cdKey = "spellCd_" .. spell.name
 				if not state[cdKey] or now >= state[cdKey] then
 					if spell.range == 0 or dist <= spell.range then
-						available[#available + 1] = spell
+						if useAoE and spell.isAoE then
+							table.insert(available, spell)
+						elseif not useAoE and not spell.isAoE then
+							table.insert(available, spell)
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- Fallback if preferred group has no off-cooldown spell
+	if #available == 0 then
+		for i = 1, #spells do
+			local spell = spells[i]
+			if level >= spell.level then
+				if not (spell.pvpOnly and not targetIsPlayer and not targetIsStrongMonster) then
+					local cdKey = "spellCd_" .. spell.name
+					if not state[cdKey] or now >= state[cdKey] then
+						if spell.range == 0 or dist <= spell.range then
+							table.insert(available, spell)
+						end
 					end
 				end
 			end
@@ -7034,8 +8711,6 @@ function BotSystem.selectAttackSpell(player, state, target)
 	end
 
 	if #available == 0 then return nil end
-
-	-- Pick randomly from available spells
 	return available[math.random(#available)]
 end
 
@@ -7050,6 +8725,12 @@ end
 function BotSystem.doCastSpell(player, state, target)
 	local now = os.time()
 	if now - state.lastAttackTime < BOT_CONFIG.ATTACK_COOLDOWN then return end
+
+	-- Druid party support: prioritize healing party leader with exura sio before attack
+	if BotSystem.checkPartySio(player, state) then
+		state.lastAttackTime = now
+		return
+	end
 
 	local pos = player:getPosition()
 	local tpos = target:getPosition()
@@ -7080,20 +8761,9 @@ function BotSystem.doCastSpell(player, state, target)
 		return
 	end
 
-	-- Ensure mana for casting (PvP: mana budget is limited so bots eventually run dry and die)
+	-- Ensure mana for casting via virtual potions
 	if player:getMana() < player:getMaxMana() * 0.3 then
-		local targetIsPlayer = Player(target:getId()) ~= nil
-		if targetIsPlayer then
-			local maxMana = player:getMaxMana()
-			local budget = maxMana * 2.5  -- 5 refills of ~50% each
-			state.pvpManaSpent = state.pvpManaSpent or 0
-			if state.pvpManaSpent < budget then
-				player:addMana(maxMana)
-				state.pvpManaSpent = state.pvpManaSpent + maxMana
-			end
-		else
-			player:addMana(player:getMaxMana())
-		end
+		BotSystem.checkBotPotions(player, state)
 	end
 
 	-- For isRune spells (SD): skip castSpell (no actual spell to cast), apply damage directly
@@ -7155,14 +8825,15 @@ function BotSystem.doHealing(player, state)
 
 	local hp = player:getHealth()
 	local maxHp = player:getMaxHealth()
-	if (hp / math.max(maxHp, 1)) * 100 > BOT_CONFIG.HEAL_THRESHOLD_PERCENT then
+	local hpRatio = hp / math.max(maxHp, 1)
+	if hpRatio * 100 > BOT_CONFIG.HEAL_THRESHOLD_PERCENT then
 		return
 	end
 
 	local now = os.time()
 	if now - state.lastHealTime < BOT_CONFIG.HEAL_COOLDOWN then return end
 
-	-- Select best heal spell (level-gated, cooldown-aware)
+	-- Select best heal spell (level-gated, cooldown-aware, hpRatio-aware)
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
 	local level = player:getLevel()
@@ -7172,7 +8843,7 @@ function BotSystem.doHealing(player, state)
 	if healSpells then
 		for i = #healSpells, 1, -1 do
 			local spell = healSpells[i]
-			if level >= spell.level then
+			if level >= spell.level and hpRatio <= (spell.minHpPercent or 0.85) then
 				local cdKey = "healCd_" .. spell.name
 				if not state[cdKey] or now >= state[cdKey] then
 					bestHeal = spell
@@ -7182,7 +8853,9 @@ function BotSystem.doHealing(player, state)
 		end
 	end
 
-	if not bestHeal then
+	if not bestHeal and healSpells and #healSpells > 0 then
+		bestHeal = healSpells[1]
+	elseif not bestHeal then
 		bestHeal = {name = "exura", heal = 80, cd = 1}
 	end
 
@@ -7197,25 +8870,22 @@ function BotSystem.doHealing(player, state)
 	player:say(bestHeal.name, TALKTYPE_MONSTER_SAY)
 	pos:sendMagicEffect(CONST_ME_MAGIC_BLUE)
 	player:addHealth(healAmount)
-	-- PvP mana budget: track total mana added, stop when budget exhausted
+	-- Mana recovery via virtual potions
 	local inPvP = false
 	if state.state == BOT_STATE.PK_ATTACK then
 		inPvP = true
 	elseif (state.state == BOT_STATE.COMBAT or state.state == BOT_STATE.FLEEING) and state.attackerId then
 		inPvP = Player(state.attackerId) ~= nil
 	end
-	local manaRegen = math.floor(level * 2 + 50)
 	if inPvP then
 		local maxMana = player:getMaxMana()
 		local budget = maxMana * 2.5  -- 5 refills of ~50% each
 		state.pvpManaSpent = state.pvpManaSpent or 0
 		if state.pvpManaSpent < budget then
-			player:addMana(manaRegen)
-			state.pvpManaSpent = state.pvpManaSpent + manaRegen
+			BotSystem.checkBotPotions(player, state)
 		end
-		-- Once budget exhausted, no more mana regen — bot drains and dies
 	else
-		player:addMana(manaRegen)
+		BotSystem.checkBotPotions(player, state)
 	end
 end
 
@@ -7257,10 +8927,162 @@ function BotSystem.getInactiveBots()
 end
 
 -- ============================================================================
--- Hunting System
+-- ============================================================================
+-- Hunting System & PM Cave Negotiation
 -- ============================================================================
 
--- Try to start a hunt: find eligible scripts, reserve one, begin travel
+function BotSystem.tryNegotiateShareHunt(askingPlayer, askingState, occupant, scriptId)
+	local script = BotHuntData.scripts[scriptId]
+	local caveName = script and script.name or "Cave"
+	local askingName = askingPlayer:getName()
+	local occupantName = occupant:getName()
+
+	-- Step 1: Send PM from asking bot to occupant bot
+	local pmQuestion = "Opa! Tem como a gente dividir a cave? Bora party e share xp!"
+	BotSystem.sendBotPrivateMessage(askingPlayer, occupant, pmQuestion)
+	logger.info(string.format("[CaveNegotiate] %s sent PM to %s asking to share '%s'",
+		askingName, occupantName, caveName))
+
+	-- Step 2: Evaluate occupant decision
+	local occState = BotState and BotState[occupant:getGuid()]
+	local occPers = occState and occState.personality or 2
+	local occArch = BotSystem.getBotArchetype(occupant, occState)
+	local askingArch = BotSystem.getBotArchetype(askingPlayer, askingState)
+	local rel = BotSystem.getRelationship(occupantName, askingName)
+	local relContext = string.format("Afinidade: %d, Status: %s, Notas: %s", rel.affinity or 0, rel.status or "NEUTRAL", rel.notes or "")
+
+	local payload = {
+		occupant = {
+			guid = occupant:getGuid(),
+			name = occupantName,
+			level = occupant:getLevel(),
+			vocation = occupant:getVocation():getName(),
+			personality = occPers,
+			archetype_id = occArch.id
+		},
+		asker = {
+			guid = askingPlayer:getGuid(),
+			name = askingName,
+			level = askingPlayer:getLevel(),
+			vocation = askingPlayer:getVocation():getName(),
+			personality = askingState.personality or 2,
+			archetype_id = askingArch.id
+		},
+		cave_name = caveName,
+		relationship_context = relContext
+	}
+
+	-- Decision heuristic
+	local decision = "REFUSE"
+	local replySpeech = "Sai fora mano, to solo aqui e nao quero dividir. Procura outra cave!"
+
+	if occPers <= 2 then
+		decision = "ACCEPT"
+		replySpeech = "Opa, bora dividir sim! Me manda party ou espera eu te convidar quando colar aqui."
+	elseif occPers == 3 then
+		local bOccVoc = occupant:getVocation():getBaseId()
+		local bAskVoc = askingPlayer:getVocation():getBaseId()
+		if (bOccVoc ~= bAskVoc) or (rel.affinity and rel.affinity > 0) then
+			decision = "ACCEPT"
+			replySpeech = "Fechou entao, divide os monstros e shareia a xp que fica bom pra nos dois."
+		else
+			decision = "REFUSE"
+			replySpeech = "Foi mal mano, to rushando solo agora. Procura outro resp."
+		end
+	else
+		decision = "REFUSE"
+		replySpeech = "Sai fora mano, cave fechada! Respeita o respawn ou vai dar ruim!"
+	end
+
+	-- Node service audit/metrics
+	BotSystem.asyncNodePost("/api/decision/negotiate_share", payload, function(res)
+		-- Node audited
+	end, function() end)
+
+	-- Step 3: Send PM reply
+	BotSystem.sendBotPrivateMessage(occupant, askingPlayer, replySpeech)
+	logger.info(string.format("[CaveNegotiate] %s replied to %s: '%s' (decision=%s)",
+		occupantName, askingName, replySpeech, decision))
+
+	if decision == "ACCEPT" then
+		BotSystem.setRelationship(askingName, occupantName, "FRIEND", 5, "SHARING_HUNT", "Accepted share in " .. caveName)
+		BotSystem.setRelationship(occupantName, askingName, "FRIEND", 5, "SHARING_HUNT", "Accepted share in " .. caveName)
+
+		-- Leave any old solo party on asker
+		local oldParty = askingPlayer:getParty()
+		if oldParty then
+			pcall(function() oldParty:removeMember(askingPlayer) end)
+		end
+
+		-- Form or join Party with occupant as leader
+		local party = occupant:getParty()
+		if not party then
+			party = Party(occupant)
+		end
+		if party then
+			pcall(function() party:addInvite(askingPlayer) end)
+			pcall(function() party:addMember(askingPlayer) end)
+			pcall(function() party:setSharedExperience(true) end)
+			logger.info(string.format("[BotParty] %s (leader) and %s (member) formed Party with Shared Exp for '%s'!",
+				occupantName, askingName, caveName))
+		end
+
+		if BotHuntData.reserveHunt(scriptId, askingPlayer:getGuid()) then
+			local duration = math.random(BOT_CONFIG.HUNT_DURATION_MIN, BOT_CONFIG.HUNT_DURATION_MAX)
+			askingState.huntScriptId = scriptId
+			askingState.huntTownId = script.town_id
+			askingState.huntStartTime = os.time()
+			askingState.huntEndTime = os.time() + duration
+			askingState.huntKillCount = 0
+			askingState.huntTargets = BotHuntData.getTargets(scriptId)
+			askingState.partyLeader = occupant:getGuid()
+			askingState.pendingPartyWith = nil
+			askingState.invadedRefusalRival = nil
+
+			BotSystem.beginHuntPhase(askingPlayer, askingState, HUNT_PHASE.TRAVEL_TO)
+			BotSystem.sendBotPrivateMessage(askingPlayer, occupant, "Valeu mano, to a caminho da cave!")
+			return "ACCEPT"
+		end
+		return "FAIL"
+	else
+		-- Refused
+		BotSystem.setRelationship(askingName, occupantName, "RIVAL", -5, "REFUSED_SHARE", "Refused share in " .. caveName)
+		BotSystem.setRelationship(occupantName, askingName, "RIVAL", -5, "REFUSED_SHARE", "Refused share in " .. caveName)
+
+		local askPers = askingState.personality or 2
+		if askPers <= 2 then
+			BotSystem.sendBotPrivateMessage(askingPlayer, occupant, "Beleza mano, vou procurar outro lugar entao.")
+			logger.info(string.format("[CaveNegotiate] %s (pers %d) respected refusal from %s for %s.",
+				askingName, askPers, occupantName, caveName))
+			return "RESPECT_REFUSAL"
+		else
+			BotSystem.sendBotPrivateMessage(askingPlayer, occupant, "Nao ligo mano, a cave nao e tua! To colando ai!")
+			logger.info(string.format("[CaveNegotiate] %s (pers %d) DECIDED TO INVADE %s despite refusal from %s!",
+				askingName, askPers, caveName, occupantName))
+
+			BotSystem.setRelationship(askingName, occupantName, "ENEMY", -10, "INVADED_AFTER_REFUSAL", "Invaded cave after refusal")
+			BotSystem.setRelationship(occupantName, askingName, "ENEMY", -10, "INVADED_AFTER_REFUSAL", "Invaded cave after refusal")
+
+			if BotHuntData.reserveHunt(scriptId, askingPlayer:getGuid()) then
+				local duration = math.random(BOT_CONFIG.HUNT_DURATION_MIN, BOT_CONFIG.HUNT_DURATION_MAX)
+				askingState.huntScriptId = scriptId
+				askingState.huntTownId = script.town_id
+				askingState.huntStartTime = os.time()
+				askingState.huntEndTime = os.time() + duration
+				askingState.huntKillCount = 0
+				askingState.huntTargets = BotHuntData.getTargets(scriptId)
+				askingState.pendingPartyWith = nil
+				askingState.invadedRefusalRival = occupant:getGuid()
+
+				BotSystem.beginHuntPhase(askingPlayer, askingState, HUNT_PHASE.TRAVEL_TO)
+				return "INVADE"
+			end
+			return "FAIL"
+		end
+	end
+end
+
+-- Try to start a hunt: prioritize current town, negotiate sharing via PM, or relocate via Temple
 function BotSystem.tryStartHunt(player, state)
 	-- Ensure bot's skills meet archetype criteria before hunting (Rusher skips, Cauteloso trains)
 	if BotSystem.getSkillTargetInfo then
@@ -7272,93 +9094,129 @@ function BotSystem.tryStartHunt(player, state)
 		end
 	end
 
+	if state.huntScriptId or state.state == BOT_STATE.HUNTING then
+		return false
+	end
+
 	local arch = BotSystem.getBotArchetype(player, state)
+	local currentTownId = BotSystem.getActualBotTown(player)
 	local botData = {
-		townId = player:getTown() and player:getTown():getId() or 8,
+		townId = currentTownId,
 	}
 	local eligible = BotHuntData.findHuntsForBot(player, botData, arch, state)
 	if #eligible == 0 then
 		return false
 	end
 
-	-- Pick from top candidates (prefer same-town hunts)
-	local pick = nil
-	-- Try same-town first
+	-- Separate into local hunts (same town) and remote hunts (other towns)
+	local localHunts = {}
+	local remoteHunts = {}
 	for _, entry in ipairs(eligible) do
-		if entry.script.town_id == botData.townId then
-			pick = entry
-			break
+		if entry.script.town_id == currentTownId then
+			table.insert(localHunts, entry)
+		else
+			table.insert(remoteHunts, entry)
 		end
 	end
-	-- Fallback to any eligible
-	if not pick then
-		pick = eligible[math.random(1, math.min(5, #eligible))]
+
+	-- PHASE 1: Try local town hunts first!
+	for _, entry in ipairs(localHunts) do
+		local scriptId = entry.scriptId
+		local occupants = BotHuntData.getOccupants(scriptId)
+
+		if #occupants == 0 then
+			-- Completely empty cave! Reserve and start immediately
+			if BotHuntData.reserveHunt(scriptId, player:getGuid()) then
+				local duration = math.random(BOT_CONFIG.HUNT_DURATION_MIN, BOT_CONFIG.HUNT_DURATION_MAX)
+				state.huntScriptId = scriptId
+				state.huntTownId = currentTownId
+				state.huntStartTime = os.time()
+				state.huntEndTime = os.time() + duration
+				state.huntKillCount = 0
+				state.huntMonsterTarget = nil
+				state.huntWaypointSkipCount = 0
+				state.huntLastPos = nil
+				state.huntTargets = BotHuntData.getTargets(scriptId)
+				state.pendingPartyWith = nil
+				state.invadedRefusalRival = nil
+
+				BotSystem.castDebug(player, state, "HUNT START (solo): " .. entry.script.name .. " in town " .. currentTownId)
+				BotSystem.beginHuntPhase(player, state, HUNT_PHASE.TRAVEL_TO)
+				logger.info("[Bot] " .. player:getName() .. " starting local hunt: " .. entry.script.name .. " in town " .. currentTownId)
+				return true
+			end
+		elseif #occupants == 1 then
+			-- 1 occupant: negotiate sharing via PM!
+			local occupant = occupants[1]
+			local occGuid = occupant:getGuid()
+			if occGuid ~= player:getGuid() then
+				-- If already in same party, just join the hunt!
+				local myP = player:getParty()
+				local occP = occupant:getParty()
+				if myP and occP and myP == occP then
+					if BotHuntData.reserveHunt(scriptId, player:getGuid()) then
+						local duration = math.random(BOT_CONFIG.HUNT_DURATION_MIN, BOT_CONFIG.HUNT_DURATION_MAX)
+						state.huntScriptId = scriptId
+						state.huntTownId = currentTownId
+						state.huntStartTime = os.time()
+						state.huntEndTime = os.time() + duration
+						state.huntKillCount = 0
+						state.huntTargets = BotHuntData.getTargets(scriptId)
+						state.partyLeader = occGuid
+						BotSystem.beginHuntPhase(player, state, HUNT_PHASE.TRAVEL_TO)
+						return true
+					end
+				end
+
+				-- Check 15-min PM negotiation cooldown to prevent endless loop & token waste
+				state.pmNegotiations = state.pmNegotiations or {}
+				local lastNeg = state.pmNegotiations[occGuid] or 0
+				if (os.time() - lastNeg) >= 900 then
+					state.pmNegotiations[occGuid] = os.time()
+					local outcome = BotSystem.tryNegotiateShareHunt(player, state, occupant, scriptId)
+					if outcome == "ACCEPT" or outcome == "INVADE" then
+						return true
+					end
+				end
+				-- If on cooldown or refused, continue to next local candidate!
+			end
+		else
+			-- Cave already has 2 occupants
+			local myPers = state.personality or 2
+			if myPers == 5 then
+				-- Toxic/bully bot invades anyway!
+				local occupant = occupants[1]
+				BotSystem.sendBotPrivateMessage(player, occupant, "To entrando na cave e quem nao gostar que saia!")
+				if BotHuntData.reserveHunt(scriptId, player:getGuid()) then
+					local duration = math.random(BOT_CONFIG.HUNT_DURATION_MIN, BOT_CONFIG.HUNT_DURATION_MAX)
+					state.huntScriptId = scriptId
+					state.huntTownId = currentTownId
+					state.huntStartTime = os.time()
+					state.huntEndTime = os.time() + duration
+					state.huntKillCount = 0
+					state.huntTargets = BotHuntData.getTargets(scriptId)
+					state.pendingPartyWith = nil
+					state.invadedRefusalRival = occupant:getGuid()
+
+					BotSystem.beginHuntPhase(player, state, HUNT_PHASE.TRAVEL_TO)
+					return true
+				end
+			end
+		end
 	end
 
-	-- Reserve the hunt (1-bot-per-spawn)
-	local scriptId = pick.scriptId
-	if not BotHuntData.reserveHunt(scriptId, player:getGuid()) then
+	-- PHASE 2: No local hunt could be started (none free or all negotiations refused)
+	-- Relocate to another town via Temple!
+	if #remoteHunts == 0 then
 		return false
 	end
 
-	-- Roll hunt duration
-	local duration = math.random(BOT_CONFIG.HUNT_DURATION_MIN, BOT_CONFIG.HUNT_DURATION_MAX)
+	local pick = remoteHunts[1]
+	local destTownId = pick.script.town_id
+	logger.info(string.format("[BotHunt] %s has no viable local hunts in town %d. Relocating to town %d for '%s' via Temple.",
+		player:getName(), currentTownId, destTownId, pick.script.name))
 
-	-- Set up hunt state
-	state.huntScriptId = scriptId
-	state.huntTownId = pick.script.town_id
-	state.huntStartTime = os.time()
-	state.huntEndTime = os.time() + duration
-	state.huntKillCount = 0
-	state.huntMonsterTarget = nil
-	state.huntWaypointSkipCount = 0
-	state.huntLastPos = nil
-	state.huntTargets = BotHuntData.getTargets(scriptId)
-
-	-- If hunt is in a different town, travel there first
-	if pick.script.town_id ~= botData.townId then
-		-- Check if reachable
-		local destinations = TRAVEL_DESTINATIONS[botData.townId]
-		if destinations then
-			local canReach = false
-			for _, destId in ipairs(destinations) do
-				if destId == pick.script.town_id then
-					canReach = true
-					break
-				end
-			end
-			if not canReach then
-				-- Can't reach this town directly — release and skip
-				BotHuntData.releaseHunt(scriptId, player:getGuid())
-				state.huntScriptId = nil
-				return false
-			end
-		end
-		-- Travel to hunt town via boat first, then begin hunt
-		state.walkTarget = nil
-		state.currentPOI = nil
-		state.pendingHuntAfterTravel = true
-		local destTownName = (pick.script.town_name or ("town " .. pick.script.town_id)):lower()
-		BotSystem.castDebug(player, state, "HUNT START: traveling to " .. (pick.script.town_name or "?")
-			.. " for " .. pick.script.name
-			.. " (duration=" .. math.floor(duration / 60) .. "m)")
-		logger.info("[Bot] " .. player:getName() .. " traveling to " .. (pick.script.town_name or "?")
-			.. " for hunt: " .. pick.script.name
-			.. " (duration=" .. math.floor(duration / 60) .. "m)")
-		BotSystem.startCavebotTravel(player, state, pick.script.town_id, destTownName)
-		return true
-	end
-
-	-- Same town: travel directly to spawn (skip pre-hunt city wandering)
-	BotSystem.castDebug(player, state, "HUNT START: " .. pick.script.name
-		.. " in " .. pick.script.town_name
-		.. " (duration=" .. math.floor(duration / 60) .. "m"
-		.. " targets=" .. #(state.huntTargets or {}) .. ")")
-	BotSystem.beginHuntPhase(player, state, HUNT_PHASE.TRAVEL_TO)
-	logger.info("[Bot] " .. player:getName() .. " starting hunt: " .. pick.script.name
-		.. " in " .. pick.script.town_name
-		.. " (duration=" .. math.floor(duration / 60) .. "m)")
-	return true
+	return BotSystem.startTempleTravel(player, state, destTownId, pick.script.name)
 end
 
 -- Begin a hunt phase (travel_to, patrolling, leaving, resupplying)
@@ -7511,6 +9369,117 @@ function BotSystem.sanitizeTravelWaypoints(player, wps)
 	return cleaned
 end
 
+-- Inject key acquisition waypoints into the route if the player/tester does not yet have the required keys in their backpack
+function BotSystem.injectKeyAcquisitionWaypoints(player, wps, huntId)
+	if not wps or #wps == 0 or not huntId then return wps end
+	local missingKeys = BotSystem.getMissingKeysForHunt(player, huntId)
+	if #missingKeys == 0 then return wps end
+
+	local out = {}
+	for i = 1, #wps do
+		out[i] = wps[i]
+	end
+
+	for _, keyInfo in ipairs(missingKeys) do
+		-- Find the best insertion index before the door on the same Z floor as keyInfo.source_z
+		local doorIdx = #out
+		for i, wp in ipairs(out) do
+			if wp.waypoint_type == "door" or (wp.pos_z == keyInfo.door_z and math.abs((wp.pos_x or 0) - keyInfo.door_x) <= 5 and math.abs((wp.pos_y or 0) - keyInfo.door_y) <= 5) then
+				doorIdx = i
+				break
+			end
+		end
+
+		local bestInsertIdx = 1
+		local bestDist = 999999
+		for i = 1, doorIdx do
+			local wp = out[i]
+			if wp and wp.pos_z == keyInfo.source_z and wp.pos_x and wp.pos_x > 0 then
+				local d = math.abs(wp.pos_x - keyInfo.source_x) + math.abs(wp.pos_y - keyInfo.source_y)
+				if d < bestDist then
+					bestDist = d
+					bestInsertIdx = i
+				end
+			end
+		end
+
+		local keyWp = {
+			phase = "travel_to",
+			seq = 0,
+			waypoint_type = "acquire_key",
+			pos_x = keyInfo.source_x,
+			pos_y = keyInfo.source_y,
+			pos_z = keyInfo.source_z,
+			label = "acquire_key_" .. tostring(keyInfo.key_number),
+			extra_data = tostring(keyInfo.key_number),
+			key_info = keyInfo,
+		}
+		table.insert(out, bestInsertIdx, keyWp)
+		logger.info(string.format("[BotKey] %s nao possui Key #%d (%s) na BP; inserindo parada em %s (%d,%d,%d) antes da hunt #%d",
+			player:getName(), keyInfo.key_number, keyInfo.key_name or "Key", keyInfo.npc_name or "Chest",
+			keyInfo.source_x, keyInfo.source_y, keyInfo.source_z, tonumber(huntId) or 0))
+	end
+
+	return out
+end
+
+-- Inject quest access waypoints (Plano A) into the route if the player/tester lacks the required quest storages
+function BotSystem.injectQuestAccessWaypoints(player, wps, huntId)
+	if not wps or #wps == 0 or not huntId then return wps end
+	local missingAccesses = BotSystem.getMissingQuestAccesses(player, huntId)
+	if #missingAccesses == 0 then return wps end
+
+	local out = {}
+	for i = 1, #wps do
+		out[i] = wps[i]
+	end
+
+	local firstWp = out[1]
+	local firstX = firstWp and firstWp.pos_x or 0
+	local firstY = firstWp and firstWp.pos_y or 0
+
+	for _, accInfo in ipairs(missingAccesses) do
+		if accInfo.npc_x and accInfo.npc_x > 0 then
+			local dist = math.max(math.abs(firstX - accInfo.npc_x), math.abs(firstY - accInfo.npc_y))
+			if dist <= 600 then
+				local bestInsertIdx = 1
+				local bestDist = 999999
+				for i = 1, #out do
+					local wp = out[i]
+					if wp and wp.pos_z == accInfo.npc_z and wp.pos_x and wp.pos_x > 0 then
+						local d = math.abs(wp.pos_x - accInfo.npc_x) + math.abs(wp.pos_y - accInfo.npc_y)
+						if d < bestDist then
+							bestDist = d
+							bestInsertIdx = i
+						end
+					end
+				end
+
+				local qWp = {
+					phase = "travel_to",
+					seq = 0,
+					waypoint_type = "quest_access",
+					pos_x = accInfo.npc_x,
+					pos_y = accInfo.npc_y,
+					pos_z = accInfo.npc_z,
+					label = "quest_access_" .. tostring(accInfo.access_code or accInfo.id),
+					extra_data = tostring(accInfo.id),
+					access_info = accInfo,
+				}
+				table.insert(out, bestInsertIdx, qWp)
+				logger.info(string.format("[BotQuest] %s nao possui acesso '%s' (storage %d); inserindo parada com NPC %s em (%d,%d,%d) antes da hunt #%d",
+					player:getName(), accInfo.name or accInfo.access_code, accInfo.required_storage_key or 0,
+					accInfo.npc_name or "NPC", accInfo.npc_x, accInfo.npc_y, accInfo.npc_z, tonumber(huntId) or 0))
+			else
+				-- NPC is in another continent: execute dialogue & fee immediately on-demand
+				BotSystem.executeQuestNpcInteraction(player, accInfo, huntId, nil, nil)
+			end
+		end
+	end
+
+	return out
+end
+
 function BotSystem.beginHuntPhase(player, state, phase)
 	-- Skip redundant pre-hunt PREPARING city loop; go straight to TRAVEL_TO
 	if phase == HUNT_PHASE.PREPARING then
@@ -7528,7 +9497,9 @@ function BotSystem.beginHuntPhase(player, state, phase)
 
 	if phase == HUNT_PHASE.TRAVEL_TO then
 		local rawWps = BotSystem.getResolvedHuntWaypoints(player, state.huntScriptId, "travel_to")
-		state.huntWaypoints = BotSystem.sanitizeTravelWaypoints(player, rawWps)
+		local sanitized = BotSystem.sanitizeTravelWaypoints(player, rawWps)
+		local withKeys = BotSystem.injectKeyAcquisitionWaypoints(player, sanitized, state.huntScriptId)
+		state.huntWaypoints = BotSystem.injectQuestAccessWaypoints(player, withKeys, state.huntScriptId)
 		if not state.huntWaypoints or #state.huntWaypoints == 0 then
 			-- No travel_to phase, go straight to patrol
 			BotSystem.beginHuntPhase(player, state, HUNT_PHASE.PATROLLING)
@@ -7605,19 +9576,12 @@ function BotSystem.doHunting(player, state)
 		return
 	end
 
-	-- Heal during hunts (throttled: only check every 5 ticks ~500ms)
+	-- Heal & Potion recovery during hunts (throttled: only check every 5 ticks ~500ms)
 	state.healCheckCooldown = (state.healCheckCooldown or 0) - 1
 	if state.healCheckCooldown <= 0 then
 		state.healCheckCooldown = 5
 		BotSystem.doHealing(player, state)
-	end
-	-- Restore mana (bots have infinite mana) — only check every 10 ticks
-	state.manaCheckCooldown = (state.manaCheckCooldown or 0) - 1
-	if state.manaCheckCooldown <= 0 then
-		state.manaCheckCooldown = 10
-		if player:getMana() < player:getMaxMana() * 0.5 then
-			player:addMana(player:getMaxMana())
-		end
+		BotSystem.checkBotPotions(player, state)
 	end
 
 	if state.huntPhase == HUNT_PHASE.PREPARING then
@@ -7729,6 +9693,12 @@ function BotSystem.doHuntPatrol(player, state)
 		return
 	end
 
+	-- If in party with a partner, apply party healing (Druid exura sio)
+	local party = player:getParty()
+	if party then
+		BotSystem.doPartyHealing(player, state, party)
+	end
+
 	-- Check for cave encounter / dispute (PK, Party, Share, Leave with 15-min cooldown)
 	BotSystem.checkCaveEncounter(player, state)
 
@@ -7794,6 +9764,8 @@ function BotSystem.advanceHuntWaypoint(player, state)
 			elseif wp.waypoint_type == "hole" or wp.waypoint_type == "shovel"
 				or wp.waypoint_type == "rope" or wp.waypoint_type == "ladder" then
 				arrivalDist = 1
+			elseif wp.waypoint_type == "acquire_key" or wp.waypoint_type == "npc_interact" or wp.waypoint_type == "quest_access" then
+				arrivalDist = 2
 			end
 
 			-- Floor-change tiles or closed shovel holes can't be stood on, so relax arrival to dist=1
@@ -7804,7 +9776,15 @@ function BotSystem.advanceHuntWaypoint(player, state)
 				end
 			end
 
-			if dx <= arrivalDist and dy <= arrivalDist and pos.z == wp.pos_z then
+			local arrived = (dx <= arrivalDist and dy <= arrivalDist and pos.z == wp.pos_z)
+			if not arrived and idx < #wps and pos.z ~= wp.pos_z then
+				local nextWp = wps[idx + 1]
+				if nextWp and nextWp.pos_z == pos.z and dx <= 3 and dy <= 3 then
+					arrived = true
+				end
+			end
+
+			if arrived then
 				-- Arrived! Handle special waypoint actions
 				BotSystem.handleHuntWaypointAction(player, state, wp)
 
@@ -7886,7 +9866,38 @@ function BotSystem.handleHuntWaypointAction(player, state, wp)
 	if wtype == "door" then
 		-- Try to open door at waypoint position
 		local doorPos = Position(wp.pos_x, wp.pos_y, wp.pos_z)
-		BotSystem.tryOpenDoors(player, doorPos)
+		BotSystem.tryOpenDoors(player, doorPos, state)
+	elseif wtype == "acquire_key" then
+		local kInfo = wp.key_info or (wp.extra_data and HUNT_KEYS_BY_NUMBER[tonumber(wp.extra_data)])
+		if kInfo then
+			local ok = BotSystem.executeKeyAcquisitionStep(player, kInfo, state.huntScriptId, nil, nil)
+			if not ok then
+				BotSystem.abortHunt(player, state, "missing GP for key #" .. tostring(kInfo.key_number))
+			end
+		end
+	elseif wtype == "quest_access" then
+		local accInfo = wp.access_info or (wp.extra_data and QUEST_ACCESS_BY_ID[tonumber(wp.extra_data)])
+		if accInfo then
+			local ok = BotSystem.executeQuestNpcInteraction(player, accInfo, state.huntScriptId, nil, nil)
+			if not ok then
+				BotSystem.abortHunt(player, state, "falha ao obter acesso de quest " .. tostring(accInfo.name))
+				return
+			end
+		end
+	elseif wtype == "npc_interact" then
+		local wps = state.huntWaypoints
+		local nextWp = wps and wps[(state.huntWaypointIdx or 0) + 1] or nil
+		local curPos = player:getPosition()
+		local nextPos = (nextWp and nextWp.pos_x and nextWp.pos_x > 0) and Position(nextWp.pos_x, nextWp.pos_y, nextWp.pos_z) or nil
+		local ok, routeInfo = BotSystem.performNpcTravelInteraction(player, curPos, nextPos, wp.label, state.huntScriptId, nil, nil)
+		if not ok then
+			BotSystem.abortHunt(player, state, "insufficient GP for NPC travel")
+			return
+		end
+		if nextPos and (math.abs(curPos.x - nextPos.x) > 30 or math.abs(curPos.y - nextPos.y) > 30 or curPos.z ~= nextPos.z) then
+			player:teleportTo(nextPos, true)
+			BotSystem.castDebug(player, state, "ACTION: NPC travel teleported to (" .. nextPos.x .. "," .. nextPos.y .. "," .. nextPos.z .. ")")
+		end
 	elseif wtype == "hole" or wtype == "shovel" then
 		-- Open closed shovel hole if present and descend to z+1
 		local holePos = Position(wp.pos_x, wp.pos_y, wp.pos_z)
@@ -7963,24 +9974,62 @@ function BotSystem.navigateToHuntWaypoint(player, state)
 		BotSystem.castDebug(player, state, "NAV: z-transition needed at wp " .. idx
 			.. " (z=" .. pos.z .. " -> z=" .. targetPos.z .. ", " .. (goDown and "DOWN" or "UP") .. ")")
 
+		-- Check if a floor-change attempt just failed
+		if state.floorChangeResult == "failed" then
+			state.floorChangeResult = nil
+			state.floorChangeFailCount = (state.floorChangeFailCount or 0) + 1
+			if state.floorChangeFailCount >= 3 then
+				local spawn = BotSystem.getSpawnPosition(player)
+				if spawn and (spawn.x ~= pos.x or spawn.y ~= pos.y or spawn.z ~= pos.z) then
+					player:teleportTo(spawn, true)
+					BotSystem.castDebug(player, state, "NAV: floor-change failed 3x, recovered to street spawn (" .. spawn.x .. "," .. spawn.y .. "," .. spawn.z .. ")")
+					state.floorChangeFailCount = 0
+					return
+				end
+			end
+		end
+
 		-- Build extra search centers (hunt-specific strategies)
 		local extraCenters = {}
-		-- Strategy 1: if previous waypoint was a rope/ladder/hole type, use its position
+		-- Strategy 0: Known temple exit stair locations if departing from underground temple
+		if pos.z == 8 and math.abs(pos.x - 33217) <= 20 and math.abs(pos.y - 31814) <= 20 then
+			-- Edron temple stairs going UP to z=7
+			table.insert(extraCenters, Position(33210, 31814, 8))
+		elseif pos.z == 7 and math.abs(pos.x - 32957) <= 20 and math.abs(pos.y - 32076) <= 20 then
+			-- Venore temple stairs going UP to z=6
+			table.insert(extraCenters, Position(32953, 32077, 7))
+		end
+
+		-- Strategy 1: if previous waypoint was a transition/stand type, use its position
 		-- (the imported script tells us exactly where the z-transition is)
+		local prevWp = nil
 		if idx > 1 then
-			local prevWp = wps[idx - 1]
-			if prevWp and prevWp.pos_x and prevWp.pos_x > 0 and prevWp.pos_z == pos.z then
-				if prevWp.waypoint_type == "rope" or prevWp.waypoint_type == "ladder"
-					or prevWp.waypoint_type == "hole" or prevWp.waypoint_type == "shovel" then
-					table.insert(extraCenters, Position(prevWp.pos_x, prevWp.pos_y, pos.z))
-					BotSystem.castDebug(player, state, "NAV: using " .. prevWp.waypoint_type
-						.. " wp hint at (" .. prevWp.pos_x .. "," .. prevWp.pos_y .. "," .. pos.z .. ")")
-				end
-				-- Strategy 2: midpoint between previous waypoint and target
-				local midX = math.floor((prevWp.pos_x + targetPos.x) / 2)
-				local midY = math.floor((prevWp.pos_y + targetPos.y) / 2)
-				table.insert(extraCenters, Position(midX, midY, pos.z))
+			prevWp = wps[idx - 1]
+		elseif #wps > 1 then
+			prevWp = wps[#wps] -- wrap around for waypoint 1
+		end
+
+		if prevWp and prevWp.pos_x and prevWp.pos_x > 0 then
+			if prevWp.waypoint_type == "rope" or prevWp.waypoint_type == "ladder"
+				or prevWp.waypoint_type == "hole" or prevWp.waypoint_type == "shovel"
+				or prevWp.waypoint_type == "stand" then
+				table.insert(extraCenters, Position(prevWp.pos_x, prevWp.pos_y, pos.z))
+				BotSystem.castDebug(player, state, "NAV: using " .. prevWp.waypoint_type
+					.. " wp hint at (" .. prevWp.pos_x .. "," .. prevWp.pos_y .. "," .. pos.z .. ")")
 			end
+			-- Strategy 2: midpoint between previous waypoint and target
+			local midX = math.floor((prevWp.pos_x + targetPos.x) / 2)
+			local midY = math.floor((prevWp.pos_y + targetPos.y) / 2)
+			table.insert(extraCenters, Position(midX, midY, pos.z))
+		end
+
+		-- Strategy 3: if target waypoint is explicitly a transition/stand type, add its (x,y) on our z
+		if wp.waypoint_type == "rope" or wp.waypoint_type == "ladder"
+			or wp.waypoint_type == "hole" or wp.waypoint_type == "shovel"
+			or wp.waypoint_type == "stand" then
+			table.insert(extraCenters, Position(wp.pos_x, wp.pos_y, pos.z))
+			BotSystem.castDebug(player, state, "NAV: using target " .. wp.waypoint_type
+				.. " wp hint at (" .. wp.pos_x .. "," .. wp.pos_y .. "," .. pos.z .. ")")
 		end
 
 		BotSystem.startFloorChange(state, goDown, targetPos,
@@ -9044,17 +11093,15 @@ function BotSystem.checkEquipmentUpgrade(player, state)
 
 	for _, s in ipairs(slots) do
 		local opt = BotEquipmentData.getOptionForSlot and BotEquipmentData.getOptionForSlot(bracket, vocStr, s.name, personality)
-		if opt and opt.item_id then
+		if opt and opt.item_id and opt.item_id > 0 then
 			local curItem = player:getSlotItem(s.slot)
 			local curId = curItem and curItem:getId() or 0
 			if curId ~= opt.item_id then
-				local price = opt.price or 1000
-				local balance = player:getBankBalance()
-				if balance >= price then
-					player:setBankBalance(balance - price)
-					player:setSlotItem(s.slot, opt.item_id, 1)
-					logger.info(string.format("[Bot:%s] [UPGRADE-MARKET] Comprou %s por %d gold no Market de Venebra e equipou no slot %s!",
-						player:getName(), opt.name or "item", price, s.name))
+				-- Bots do not need to buy items; they automatically receive and equip their chosen progression item
+				local ok = player:setSlotItem(s.slot, opt.item_id, 1)
+				if ok then
+					logger.info(string.format("[Bot:%s] [UPGRADE-PROGRESSION] Ganhou e equipou %s (bracket %d, personality %d) no slot %s!",
+						player:getName(), opt.name or ("item " .. opt.item_id), bracket, personality, s.name))
 				end
 			end
 		end
@@ -9324,45 +11371,6 @@ function BotSystem.doHuntResupply(player, state)
 					state.resupplyRoute = nil
 					state.routeIdx = nil
 				elseif result == "failed" then
-					state.resupplyStep = "shop"
-					state.resupplyUntil = 0
-					state.resupplyRoute = nil
-					state.routeIdx = nil
-				end
-				return
-			end
-			state.resupplyStep = "shop"
-			state.resupplyUntil = 0
-			return
-		end
-		-- Depot delay done, move to shop
-		BotSystem.castDebug(player, state, "RESUPPLY: depot done, -> shop")
-		state.resupplyStep = "shop"
-		state.resupplyUntil = 0
-		state.resupplyRoute = nil
-		state.routeIdx = nil
-
-	elseif step == "shop" then
-		if state.resupplyUntil == 0 then
-			if not state.resupplyRoute then
-				BotSystem.castDebug(player, state, "RESUPPLY: finding route to shop (potions/runes/ammo)")
-				state.resupplyRoute = findRouteToDestination("potions")
-					or findRouteToDestination("runes")
-					or findRouteToDestination("ammo")
-				state.routeIdx = nil
-			end
-			if state.resupplyRoute then
-				local result = BotSystem.followCityRoute(player, state, state.resupplyRoute)
-				if result == "arrived" then
-					state.resupplyLastPOI = "potions"
-					if math.random(1, 2) == 1 then
-						player:say("hi", TALKTYPE_SAY)
-					end
-					state.resupplyUntil = os.time() + math.random(
-						BOT_CONFIG.HUNT_RESUPPLY_SHOP_MIN, BOT_CONFIG.HUNT_RESUPPLY_SHOP_MAX)
-					BotSystem.castDebug(player, state, "RESUPPLY: arrived at shop, waiting "
-						.. (state.resupplyUntil - os.time()) .. "s")
-				elseif result == "failed" then
 					state.resupplyStep = "done"
 					state.resupplyUntil = 0
 					state.resupplyRoute = nil
@@ -9374,7 +11382,15 @@ function BotSystem.doHuntResupply(player, state)
 			state.resupplyUntil = 0
 			return
 		end
-		BotSystem.castDebug(player, state, "RESUPPLY: shop done, -> done")
+		-- Depot delay done: bypass shop (bots use virtual potions & auto-progression gear) -> done
+		BotSystem.castDebug(player, state, "RESUPPLY: depot done, -> done (bypassing shop, potions are virtual)")
+		state.resupplyStep = "done"
+		state.resupplyUntil = 0
+		state.resupplyRoute = nil
+		state.routeIdx = nil
+
+	elseif step == "shop" then
+		BotSystem.castDebug(player, state, "RESUPPLY: shop bypassed, -> done (potions are virtual)")
 		state.resupplyStep = "done"
 		state.resupplyUntil = 0
 		state.resupplyRoute = nil
@@ -9510,6 +11526,18 @@ function BotSystem.endHunt(player, state)
 	state.walkTarget = nil
 	state.currentPOI = nil
 
+	-- Leave party if in one
+	local party = player:getParty()
+	if party then
+		pcall(function() party:removeMember(player) end)
+		if party:getMemberCount() <= 1 then
+			pcall(function() party:disband() end)
+		end
+	end
+	state.partyLeader = nil
+	state.pendingPartyWith = nil
+	state.invadedRefusalRival = nil
+
 	-- Teleport home if far from town
 	local town = player:getTown()
 	if town then
@@ -9545,6 +11573,13 @@ function BotSystem.abortHunt(player, state, reason)
 		.. " reason=" .. (reason or "unknown")
 		.. " kills=" .. (state.huntKillCount or 0)
 		.. " phase=" .. (state.huntPhase or "?"))
+
+	if reason and (reason:find("stuck") or reason:find("timeout")) then
+		BotSystem.recordImpediment(player, scriptId, scriptName, nil, "WAYPOINT_STUCK",
+			"WP #" .. tostring(state.huntWaypointIdx or 0),
+			string.format("Bot travou na hunt '%s' (fase %s): %s", scriptName, tostring(state.huntPhase or "?"), reason),
+			player:getPosition())
+	end
 
 	-- Release reservation
 	if scriptId then
@@ -9644,10 +11679,8 @@ function BotSystem.doPartyFollow(player, state)
 	-- Self heal (always)
 	BotSystem.doHealing(player, state)
 
-	-- Mana restore
-	if player:getMana() < player:getMaxMana() * 0.5 then
-		player:addMana(player:getMaxMana())
-	end
+	-- Mana recovery via virtual potions
+	BotSystem.checkBotPotions(player, state)
 
 	-- Party healing (druid only)
 	BotSystem.doPartyHealing(player, state, party)
@@ -10001,6 +12034,18 @@ function BotSystem.executeMacroIntent(player, state, intent, speech, targetPlaye
 
 	if speech and type(speech) == "string" and #speech > 0 then
 		player:say(speech, TALKTYPE_SAY)
+		if db and db.botAsyncQuery then
+			db.botAsyncQuery(string.format(
+				"INSERT INTO `bot_audit_chats` (`sender`, `receiver`, `channel`, `message`, `llm_prompt`, `llm_response`, `action_taken`, `timestamp`) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())",
+				db.escapeString(player:getName()),
+				db.escapeString("*Local*"),
+				db.escapeString("Local"),
+				db.escapeString("Macro: " .. tostring(intent or "NONE")),
+				db.escapeString("Autonomous Macro Intent"),
+				db.escapeString(speech),
+				db.escapeString(tostring(intent or "NONE"))
+			))
+		end
 	end
 
 	intent = tostring(intent or "NONE"):upper()
@@ -10015,7 +12060,25 @@ function BotSystem.executeMacroIntent(player, state, intent, speech, targetPlaye
 		state.huntCooldownUntil = 0
 		if state.state ~= BOT_STATE.HUNTING then
 			if not BotSystem.tryStartHunt(player, state) then
-				logger.info("[BotMacro] " .. player:getName() .. " wanted to HUNT, no eligible spawn free right now")
+				logger.info("[BotMacro] " .. player:getName() .. " wanted to HUNT, no eligible spawn free right now (applying backoff)")
+				state.nextMacroDecisionTime = os.time() + math.random(180, 300)
+				state.huntCooldownUntil = os.time() + math.random(90, 180)
+				-- Fallback: treina skills ou descansa no depot enquanto aguarda vaga na cave
+				if not (BotSystem.startStatueTraining and BotSystem.startStatueTraining(player, state, false)) then
+					local town = player:getTown()
+					local pois = town and CITY_POIS[town:getId()]
+					if pois then
+						for _, p in ipairs(pois) do
+							if p.type == "depot" or p.type == "temple" then
+								state.currentPOI = p
+								state.walkTarget = p.pos
+								state.state = BOT_STATE.IDLE
+								state.dwellUntil = os.time() + math.random(30, 60)
+								break
+							end
+						end
+					end
+				end
 			end
 		end
 	elseif intent == "RESTOCK" or intent == "DEPOT" then
@@ -10363,6 +12426,18 @@ function BotSystem.onBotHear(bot, speaker, speakType, text)
 
 			if replyText and #replyText > 0 then
 				b2:say(replyText, TALKTYPE_SAY)
+				if db and db.botAsyncQuery then
+					db.botAsyncQuery(string.format(
+						"INSERT INTO `bot_audit_chats` (`sender`, `receiver`, `channel`, `message`, `llm_prompt`, `llm_response`, `action_taken`, `timestamp`) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())",
+						db.escapeString(spk2 and spk2:getName() or "Player"),
+						db.escapeString(b2:getName()),
+						db.escapeString(isPrivate and "Private" or "Default"),
+						db.escapeString(text or ""),
+						db.escapeString("Player Heard Speech (DeepSeek AI)"),
+						db.escapeString(replyText),
+						db.escapeString(actionIntent)
+					))
+				end
 			end
 			if obey and actionIntent ~= "NONE" then
 				BotSystem.executeMacroIntent(b2, s2, actionIntent, nil, spk2)
@@ -10489,6 +12564,19 @@ function BotSystem.tryBotToBotDialogue(player, state)
 							speakerBot:say(speechText, TALKTYPE_SAY)
 							logger.info(string.format("[BotDialogue] Turn %d/%d %s: \"%s\"",
 								i, maxTurns, speakerBot:getName(), speechText))
+							if db and db.botAsyncQuery then
+								local otherBot = (speakerBot == pA) and pB or pA
+								db.botAsyncQuery(string.format(
+									"INSERT INTO `bot_audit_chats` (`sender`, `receiver`, `channel`, `message`, `llm_prompt`, `llm_response`, `action_taken`, `timestamp`) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())",
+									db.escapeString(speakerBot:getName()),
+									db.escapeString(otherBot:getName()),
+									db.escapeString("Local Dialogue"),
+									db.escapeString(string.format("Turno %d/%d (%s)", i, maxTurns, tostring(location_name or "Depot"))),
+									db.escapeString("Bot-to-Bot Dialogue"),
+									db.escapeString(speechText),
+									db.escapeString("DIALOGUE")
+								))
+							end
 						end
 					end
 				end
@@ -10501,5 +12589,7 @@ function BotSystem.tryBotToBotDialogue(player, state)
 	end)
 end
 
-logger.info("[BotSystem] Bot system library loaded (Node.js macro AI, GOD/player chat obedience, 5-turn bot dialogue, trap-safe nav)")
+BotSystem.loadNpcAndKeyCatalogs()
+logger.info("[BotSystem] Bot system library loaded (Node.js macro AI, GOD/player chat obedience, 5-turn bot dialogue, trap-safe nav, NPC travel & key catalogs)")
+
 

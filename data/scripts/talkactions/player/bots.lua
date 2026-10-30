@@ -1,4 +1,4 @@
-local botsTalkaction = TalkAction("!bots")
+local botsTalkaction = TalkAction("!bots", "/bots")
 
 function botsTalkaction.onSay(player, words, param)
 	param = (param or ""):gsub("^%s*(.-)%s*$", "%1")
@@ -114,8 +114,20 @@ function botsTalkaction.onSay(player, words, param)
 		player:sendTextMessage(MESSAGE_EVENT_ADVANCE, string.format("[Bots] Cluster ativo com DeepSeek IA e FSM. Bots online: %d/75. Painel Web: http://localhost:8085", onlineBots))
 		return true
 
+	elseif lowerParam == "spells" or lowerParam == "update_spells" or lowerParam == "magias" then
+		local count = 0
+		for _, p in ipairs(Game.getPlayers()) do
+			if p:isBotPlayer() then
+				BotSystem.learnAllSpells(p)
+				pcall(function() p:save() end)
+				count = count + 1
+			end
+		end
+		player:sendTextMessage(MESSAGE_EVENT_ADVANCE, string.format("[Bots] Magias sincronizadas e salvas com sucesso para %d bots online!", count))
+		return true
+
 	else
-		player:sendTextMessage(MESSAGE_EVENT_ADVANCE, "Comandos: !bots start | !bots stop | !bots reset soft | !bots reset hard | !bots train | !talk <Bot>, <Mensagem> | !bots add <Nome>, <Voc>, <Lvl>, <Cidade> | !bots remove <Nome> | !bots status")
+		player:sendTextMessage(MESSAGE_EVENT_ADVANCE, "Comandos: !bots start | !bots stop | !bots spells | !bots reset soft | !bots reset hard | !bots train | !talk <Bot>, <Mensagem> | !bots add <Nome>, <Voc>, <Lvl>, <Cidade> | !bots remove <Nome> | !bots status")
 		return true
 	end
 end
@@ -252,7 +264,11 @@ function talkBotTalkaction.onSay(player, words, param)
 	targetBot:say(speech, TALKTYPE_SAY)
 
 	if action == "FOLLOW" or msg:lower():find("segue") or msg:lower():find("follow") then
-		local dest = player:getPosition():getClosestFreePosition(targetBot, 1) or player:getPosition()
+		local pPlayer = player:getPosition()
+		local dest = targetBot:getClosestFreePosition(pPlayer, 1)
+		if not dest or dest.x == 0 then
+			dest = pPlayer
+		end
 		targetBot:teleportTo(dest)
 	end
 

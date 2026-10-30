@@ -23,6 +23,14 @@ function botDeath.onDeath(player, corpse, killer, mostDamageKiller, unjustified,
 
 	logger.info("[Bot] " .. botName .. " died — AI paused, will resume in 10-180s at temple")
 
+	-- Re-apply 8 blessings upon respawn in temple so bot remains fully protected
+	addEvent(function()
+		local p = Player(guid)
+		if p and not p:isRemoved() and BotSystem and BotSystem.applyBotBlessings then
+			BotSystem.applyBotBlessings(p)
+		end
+	end, 4000)
+
 	return true
 end
 
