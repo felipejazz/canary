@@ -1919,11 +1919,11 @@ BOT_TIBIADATA_SPELLS = {
 			formula = "utori con",
 			level = 20,
 			mana = 250,
-			cd = 10,
+			cd = 2,
 			group = "support",
 			damageType = "",
 			isRune = false,
-			premium_only = true
+			premium_only = false
 		},
 		{
 			name = "Disintegrate Rune",
