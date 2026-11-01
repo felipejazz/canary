@@ -19,6 +19,7 @@
 #include "game/zones/zone.hpp"
 #include "lib/di/container.hpp"
 #include "lua/creature/events.hpp"
+#include "lua/creature/creatureevent.hpp"
 #include "lua/modules/modules.hpp"
 #include "lua/scripts/lua_environment.hpp"
 #include "lua/scripts/scripts.hpp"
@@ -192,6 +193,8 @@ bool GameReload::reloadScripts() {
 	g_scripts().loadScripts(coreFolder + "/scripts/lib", true, false);
 	g_scripts().loadScripts(datapackFolder + "/scripts", false, true);
 	g_scripts().loadScripts(coreFolder + "/scripts", false, true);
+
+	g_creatureEvents().removeInvalidEvents();
 
 	// It should come last, after everything else has been cleaned up.
 	reloadMonsters();

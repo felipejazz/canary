@@ -1,45 +1,51 @@
 -- ============================================================================
--- Bot Market Funding -- top up bot bank balances at server startup
+-- Bot Market Funding -- baseline survival balance check at server startup
 -- ============================================================================
--- Each bot needs sufficient gold to make BUY offers and accept real player SELL
--- offers. Per the approved plan we top up to 100 kkk (100 billion gp) every
--- server startup.
---
--- Why 30s delay: bot_manager.lua loads 200 bots with 100ms staggered addEvent()
--- which takes ~20 seconds. We wait 30s to be safe so all bots are in BotPlayers.
--- For online bots we call Player:setBankBalance directly (otherwise raw SQL would
--- be overwritten on the next save). For any bot not yet loaded, raw SQL is the
--- defensive fallback.
+-- Bots do NOT receive infinite gold (no 100kkk injection).
+-- Instead, this startup task ensures every bot has at least the minimum
+-- baseline gold for their level bracket, so bots that went bankrupt can
+-- afford basic potions to hunt, while bots that profited keep their real wealth.
 -- ============================================================================
 
-local FUND_AMOUNT = 100000000000 -- 100 kkk per bot
+local function getLevelMinimumBalance(level)
+	if level >= 200 then
+		return 150000
+	elseif level >= 130 then
+		return 80000
+	elseif level >= 100 then
+		return 45000
+	elseif level >= 80 then
+		return 25000
+	elseif level >= 50 then
+		return 12000
+	elseif level >= 20 then
+		return 3500
+	else
+		return 1000
+	end
+end
+
 local FUNDING_DELAY_MS = 30000
 
 local botMarketFunding = GlobalEvent("BotMarketFunding")
 
 function botMarketFunding.onStartup()
 	addEvent(function()
-		local fundedInMemory = 0
-		local botAccountId = (BOT_CONFIG and BOT_CONFIG.BOT_ACCOUNT_ID) or 65000
-
+		local toppedUp = 0
 		for _, player in pairs(BotPlayers or {}) do
 			if player and not player:isRemoved() then
-				player:setBankBalance(FUND_AMOUNT)
-				fundedInMemory = fundedInMemory + 1
+				local curBal = player:getBankBalance() or 0
+				local minBal = getLevelMinimumBalance(player:getLevel())
+				if curBal < minBal then
+					player:setBankBalance(minBal)
+					toppedUp = toppedUp + 1
+				end
 			end
 		end
 
-		-- Defensive raw-SQL update for any bot that wasn't loaded into memory.
-		-- For in-memory bots this gets overwritten by their next save (using the
-		-- already-set bank balance from above), so it's harmless.
-		db.asyncQuery(string.format(
-			"UPDATE `players` SET `balance` = %d WHERE `account_id` = %d",
-			FUND_AMOUNT, botAccountId
-		))
-
 		logger.info(string.format(
-			"[BotMarketFunding] Funded %d in-memory bots with %d gp each (raw-SQL backstop applied to all account=%d players)",
-			fundedInMemory, FUND_AMOUNT, botAccountId
+			"[BotMarketFunding] Baseline survival check complete: %d bots topped up to level minimums (no infinite gold).",
+			toppedUp
 		))
 	end, FUNDING_DELAY_MS)
 

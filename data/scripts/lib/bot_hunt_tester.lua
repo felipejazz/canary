@@ -194,13 +194,31 @@ function HuntTester.getOrLoadWorker(workerName)
 			pcall(function() BotSystem.applyQuestStorages(player) end)
 		end
 		local curSpeed = player:getSpeed()
-		if curSpeed < 800 then
-			player:changeSpeed(800 - curSpeed)
+		local targetSpeed = 3000
+		if curSpeed < targetSpeed then
+			player:changeSpeed(targetSpeed - curSpeed)
 		end
 		local guid = player:getGuid()
 		if guid then
+			-- Claim this character for the HuntTester: mark it so the autonomous
+			-- bot brain (watchdog -> activateBot -> NotJev HUNT) stays out, and
+			-- tear down any think loop the watchdog may have already started on
+			-- it. We stop the brain in place (no teleport-to-dead-position like
+			-- deactivateBot does) because the tester teleports it to the temple.
+			if BotSystem and BotSystem.markHuntTesterWorker then
+				BotSystem.markHuntTesterWorker(guid, true)
+			end
+			if BotState and BotState[guid] and BotState[guid].huntScriptId and BotHuntData and BotHuntData.releaseHunt then
+				pcall(function() BotHuntData.releaseHunt(BotState[guid].huntScriptId, guid) end)
+				BotState[guid].huntScriptId = nil
+			end
 			if BotPlayers then
 				BotPlayers[guid] = player
+			end
+			if BotActive then BotActive[guid] = false end
+			if botThinkEvents and botThinkEvents[guid] then
+				stopEvent(botThinkEvents[guid])
+				botThinkEvents[guid] = nil
 			end
 			if BotSystem and BotSystem.cancelBotWalk then
 				BotSystem.cancelBotWalk(guid)
@@ -236,24 +254,21 @@ function HuntTester.playerHasHuntAccess(player, scriptId)
 	return hasAll, table.concat(accessCodes, ", ")
 end
 
--- Fetch all waypoints for a hunt script across travel_to, hunt_patrol, travel_from
+-- Fetch patrol waypoints for a hunt script (cave travel overland is eliminated)
 function HuntTester.loadHuntWaypoints(scriptId)
 	local wps = {}
-	local travelTo = (BotHuntData and BotHuntData.getPhaseWaypoints and BotHuntData.getPhaseWaypoints(scriptId, "travel_to")) or {}
-	local patrol = (BotHuntData and BotHuntData.getPhaseWaypoints and BotHuntData.getPhaseWaypoints(scriptId, "hunt_patrol")) or {}
-	local travelFrom = (BotHuntData and BotHuntData.getPhaseWaypoints and BotHuntData.getPhaseWaypoints(scriptId, "travel_from")) or {}
+	local patrol = (BotSystem and BotSystem.getResolvedHuntWaypoints and BotSystem.getResolvedHuntWaypoints(HuntTester.currentLoadingPlayer, scriptId, "hunt_patrol")) or (BotHuntData and BotHuntData.getPhaseWaypoints and BotHuntData.getPhaseWaypoints(scriptId, "hunt_patrol")) or {}
 
 	-- If BotHuntData not loaded or empty, fallback to direct DB query
-	if #travelTo == 0 and #patrol == 0 and #travelFrom == 0 then
+	if #patrol == 0 then
 		local res = db.storeQuery(
 			"SELECT `phase`, `seq`, `waypoint_type`, `pos_x`, `pos_y`, `pos_z`, `label`, `extra_data` " ..
-			"FROM `bot_hunt_waypoints` WHERE `script_id` = " .. tonumber(scriptId) .. " ORDER BY `phase`, `seq` ASC"
+			"FROM `bot_hunt_waypoints` WHERE `script_id` = " .. tonumber(scriptId) .. " AND `phase` = 'hunt_patrol' ORDER BY `seq` ASC"
 		)
 		if res then
 			repeat
-				local phase = Result.getString(res, "phase")
-				local wp = {
-					phase = phase,
+				table.insert(patrol, {
+					phase = "hunt_patrol",
 					seq = Result.getNumber(res, "seq"),
 					waypoint_type = Result.getString(res, "waypoint_type"),
 					pos_x = Result.getNumber(res, "pos_x"),
@@ -261,63 +276,16 @@ function HuntTester.loadHuntWaypoints(scriptId)
 					pos_z = Result.getNumber(res, "pos_z"),
 					label = Result.getString(res, "label"),
 					extra_data = Result.getString(res, "extra_data"),
-				}
-				if phase == "travel_to" then
-					table.insert(travelTo, wp)
-				elseif phase == "hunt_patrol" then
-					table.insert(patrol, wp)
-				elseif phase == "travel_from" then
-					table.insert(travelFrom, wp)
-				end
+				})
 			until not Result.next(res)
 			Result.free(res)
 		end
 	end
 
-	-- 1. Travel To phase (inject preventive key acquisition waypoints if hunt requires keys)
-	if BotSystem and BotSystem.injectKeyAcquisitionWaypoints then
-		local dummyPlayer = HuntTester.currentLoadingPlayer
-		if dummyPlayer then
-			travelTo = BotSystem.injectKeyAcquisitionWaypoints(dummyPlayer, travelTo, scriptId)
-		end
-	end
-	if BotSystem and BotSystem.injectQuestAccessWaypoints then
-		local dummyPlayer = HuntTester.currentLoadingPlayer
-		if dummyPlayer then
-			travelTo = BotSystem.injectQuestAccessWaypoints(dummyPlayer, travelTo, scriptId)
-		end
-	end
-	for _, wp in ipairs(travelTo) do
-		wp.phase = "travel_to"
-		table.insert(wps, wp)
-	end
-
-	-- 2. Hunt Patrol phase (1 full cycle)
+	-- Only hunt_patrol waypoints are tested
 	for _, wp in ipairs(patrol) do
 		wp.phase = "hunt_patrol"
 		table.insert(wps, wp)
-	end
-
-	-- 3. Travel From phase (if missing, reverse travel_to)
-	if #travelFrom > 0 then
-		for _, wp in ipairs(travelFrom) do
-			wp.phase = "travel_from"
-			table.insert(wps, wp)
-		end
-	elseif #travelTo > 0 then
-		for i = #travelTo, 1, -1 do
-			local orig = travelTo[i]
-			table.insert(wps, {
-				phase = "travel_from",
-				seq = #travelTo - i + 1,
-				waypoint_type = orig.waypoint_type,
-				pos_x = orig.pos_x,
-				pos_y = orig.pos_y,
-				pos_z = orig.pos_z,
-				label = orig.label,
-				extra_data = orig.extra_data
-			})
-		end
 	end
 
 	return wps
@@ -369,8 +337,9 @@ function HuntTester.start(options)
 		HuntTester.resetReports()
 	end
 
-	local workersCount = math.max(1, math.min(8, tonumber(options.workers) or 1))
+	local workersCount = math.max(1, math.min(20, tonumber(options.workers) or 1))
 	HuntTester.workers = workersCount
+	HuntTester.mode = options.mode or "full"
 	HuntTester.running = true
 	HuntTester.queue = {}
 	HuntTester.queueIndex = 1
@@ -426,10 +395,10 @@ function HuntTester.start(options)
 
 	local filterMsg = (options.untestedOnly or not options.force) and " (apenas não-testadas)" or " (modo completo/force)"
 	HuntTester.broadcast(string.format(
-		"[HuntTester] INICIANDO TESTES: %d hunts na fila%s | %d Tester(s) em paralelo",
-		HuntTester.totalQueued, filterMsg, HuntTester.workers
+		"[HuntTester] INICIANDO TESTES [Modo: %s]: %d hunts na fila%s | %d Tester(s) em paralelo",
+		(HuntTester.mode or "full"):upper(), HuntTester.totalQueued, filterMsg, HuntTester.workers
 	))
-	HuntTester.logEvent("INFO", "System", nil, "batch", 0, HuntTester.totalQueued, nil, nil, "BATCH_START", string.format("Starting batch with %d hunts on %d workers (filter=%s)", HuntTester.totalQueued, HuntTester.workers, filterMsg))
+	HuntTester.logEvent("INFO", "System", nil, "batch", 0, HuntTester.totalQueued, nil, nil, "BATCH_START", string.format("Starting batch [mode=%s] with %d hunts on %d workers (filter=%s)", HuntTester.mode or "full", HuntTester.totalQueued, HuntTester.workers, filterMsg))
 
 	-- Dispatch initial workers
 	for i = 1, HuntTester.workers do
@@ -438,6 +407,26 @@ function HuntTester.start(options)
 	end
 
 	return true
+end
+
+-- Release every character this batch claimed back to normal: clear the
+-- HuntTester-worker mark so the autonomous brain may own them again.
+function HuntTester.releaseAllWorkers()
+	if not (BotSystem and BotSystem.markHuntTesterWorker) then return end
+	local maxWorkers = HuntTester.maxWorkerSlots or 20
+	for i = 1, maxWorkers do
+		local names = { "Tester " .. i }
+		if i == 1 then table.insert(names, "Tester") end
+		for _, nm in ipairs(names) do
+			local p = Player(nm)
+			if p then
+				pcall(function()
+					BotSystem.markHuntTesterWorker(p:getGuid(), false)
+					p:stopWalk()
+				end)
+			end
+		end
+	end
 end
 
 -- Stop testing suite
@@ -462,6 +451,7 @@ function HuntTester.stop()
 		end
 	end
 	HuntTester.activeWorkers = {}
+	HuntTester.releaseAllWorkers()
 
 	db.asyncQuery("UPDATE `bot_hunt_test_commands` SET `status` = 'COMPLETED' WHERE `status` = 'RUNNING'")
 	HuntTester.logEvent("INFO", "System", nil, "batch", 0, 0, nil, nil, "BATCH_STOP", "Test suite stopped by operator")
@@ -522,7 +512,8 @@ function HuntTester.getStatus()
 	end
 
 	return summary .. string.format(
-		"=== Execução Ativa ===\nLote: %d/%d (%d%%) | Restantes no lote: %d | Tempo: %ds | Workers: %d\nAtivos: %s",
+		"=== Execução Ativa [Modo: %s] ===\nLote: %d/%d (%d%%) | Restantes no lote: %d | Tempo: %ds | Workers: %d\nAtivos: %s",
+		(HuntTester.mode or "full"):upper(),
 		completed, HuntTester.totalQueued,
 		HuntTester.totalQueued > 0 and math.floor((completed / HuntTester.totalQueued) * 100) or 0,
 		remaining, elapsed, HuntTester.workers,
@@ -601,9 +592,81 @@ function HuntTester.dispatchNextHuntForWorker(workerName)
 	local waypoints = HuntTester.loadHuntWaypoints(huntId)
 	HuntTester.currentLoadingPlayer = nil
 
+	local mode = HuntTester.mode or "full"
+
+	-- MODE: RESUPPLY (tests city resupply cycle without needing cave waypoints)
+	if mode == "resupply" then
+		local guid = player:getGuid()
+		if BotSystem and BotSystem.cancelBotWalk then BotSystem.cancelBotWalk(guid) end
+		if player.stopWalk then pcall(function() player:stopWalk() end) end
+		if player.setMoveLocked then pcall(function() player:setMoveLocked(false) end) end
+
+		local templePos = HuntTester.getTemplePosition(huntInfo.town_id, huntInfo.town_name)
+		player:teleportTo(templePos, true)
+		if BotSystem and BotSystem.initBot then BotSystem.initBot(player) end
+
+		local s = BotState and BotState[guid]
+		if s then
+			s.huntTownId = huntInfo.town_id
+			s.huntScriptId = huntId
+			s.personality = 2
+		end
+
+		if player.getBankBalance and player:getBankBalance() < 10000 then
+			player:setBankBalance(20000)
+		end
+		if player.getItemCount and player:getItemCount(3031) == 0 then
+			player:addItem(3031, 100)
+		end
+
+		if BotSystem and BotSystem.beginHuntPhase then
+			BotSystem.beginHuntPhase(player, s, HUNT_PHASE.RESUPPLYING)
+		end
+
+		local state = {
+			workerName = workerName,
+			huntId = huntId,
+			huntInfo = huntInfo,
+			mode = "resupply",
+			huntStartTime = os.time(),
+			resupplyStartTime = os.time(),
+			waypoints = waypoints or {},
+			currentWpIndex = 1,
+			completedWaypoints = 0
+		}
+		HuntTester.activeWorkers[workerName] = state
+		HuntTester.broadcast(string.format(
+			"[%s] [RESUPPLY] Testando ciclo de cidade da Hunt [%d] '%s' (%s)",
+			workerName, huntId, huntInfo.name, huntInfo.town_name
+		))
+		HuntTester.scheduleWorkerTick(workerName, 200)
+		return
+	end
+
 	if #waypoints == 0 then
-		-- Hunt has no waypoints at all! Mark BUGGED immediately
-		HuntTester.recordReport(workerName, huntInfo, "BUGGED", "Nenhum waypoint cadastrado para a hunt", 0, 0, 0, 0, 0, 0)
+		-- Hunt has no patrol waypoints at all! Mark BUGGED immediately
+		HuntTester.recordReport(workerName, huntInfo, "BUGGED", "Nenhum waypoint de patrulha cadastrado para a hunt", 0, 0, 0, 0, 0, 0, mode)
+		HuntTester.dispatchNextHuntForWorker(workerName)
+		return
+	end
+
+	-- MODE: CAVE (fast static validation of cave entrance)
+	if mode == "cave" then
+		local firstWp = waypoints[1]
+		local cavePos = Position(firstWp.pos_x, firstWp.pos_y, firstWp.pos_z)
+		local ok = player:teleportTo(cavePos, true)
+		local postPos = player:getPosition()
+		local tile = Tile(postPos)
+		local ground = tile and tile:getGround()
+		local walkable = tile and tile:isWalkable()
+
+		if not ok or not ground or not walkable then
+			HuntTester.recordReport(workerName, huntInfo, "BUGGED",
+				string.format("Entrada da cave inacessivel (tile invalido/bloqueado em %d,%d,%d)", postPos.x, postPos.y, postPos.z),
+				postPos.x, postPos.y, postPos.z, 0, #waypoints, 0, "cave")
+		else
+			HuntTester.recordReport(workerName, huntInfo, "ACCESSIBLE", nil, 0, 0, 0, 1, #waypoints, 1, "cave")
+		end
 		HuntTester.dispatchNextHuntForWorker(workerName)
 		return
 	end
@@ -622,13 +685,13 @@ function HuntTester.dispatchNextHuntForWorker(workerName)
 			end
 		end
 		if not hasQuestWp then
-			HuntTester.recordReport(workerName, huntInfo, "BUGGED", "Falta acesso de quest obrigatório: " .. tostring(accessSummary), 0, 0, 0, 0, #waypoints, 0)
+			HuntTester.recordReport(workerName, huntInfo, "BUGGED", "Falta acesso de quest obrigatório: " .. tostring(accessSummary), 0, 0, 0, 0, #waypoints, 0, mode)
 			HuntTester.dispatchNextHuntForWorker(workerName)
 			return
 		end
 	end
 
-	-- Teleport worker to town temple to begin complete cycle
+	-- Teleport worker directly to cave entrance (first patrol waypoint)
 	local guid = player:getGuid()
 	if BotSystem and BotSystem.cancelBotWalk then
 		BotSystem.cancelBotWalk(guid)
@@ -640,37 +703,34 @@ function HuntTester.dispatchNextHuntForWorker(workerName)
 		pcall(function() player:setMoveLocked(false) end)
 	end
 
+	local firstWp = waypoints[1]
+	local caveEntrance = Position(firstWp.pos_x, firstWp.pos_y, firstWp.pos_z)
 	local prePos = player:getPosition()
-	local templePos = HuntTester.getTemplePosition(huntInfo.town_id, huntInfo.town_name)
-	HuntTester.logEvent("INFO", workerName, huntInfo, "setup", 0, #waypoints, prePos, templePos, "TELEPORT_TEMPLE", string.format("Teleporting to %s Temple (town_id=%d, target=(%d,%d,%d))", huntInfo.town_name, huntInfo.town_id, templePos.x, templePos.y, templePos.z))
-	local tTile = Tile(templePos)
-	if tTile then
-		local items = tTile:getItems()
-		local itemDesc = {}
-		if items then
-			for _, it in ipairs(items) do
-				table.insert(itemDesc, string.format("id=%d", it:getId()))
-			end
-		end
-		HuntTester.logEvent("INFO", workerName, huntInfo, "setup", 0, #waypoints, prePos, templePos, "TILE_INSPECT", string.format("items=[%s], hasPZ=%s", table.concat(itemDesc, ","), tostring(tTile:hasFlag(TILESTATE_PROTECTIONZONE))))
-	end
+	HuntTester.logEvent("INFO", workerName, huntInfo, "setup", 0, #waypoints, prePos, caveEntrance, "TELEPORT_CAVE", string.format("Teleporting directly to cave entrance (%d,%d,%d)", caveEntrance.x, caveEntrance.y, caveEntrance.z))
+	local ok = player:teleportTo(caveEntrance, true)
+	local postPos = player:getPosition()
+	local tTile = Tile(postPos)
 	local tGround = tTile and tTile:getGround()
 	local tWalk = tTile and tTile:isWalkable()
-	local tCreatures = tTile and tTile:getCreatureCount() or 0
-	local ok = player:teleportTo(templePos, true)
-	local postPos = player:getPosition()
-	HuntTester.logEvent("INFO", workerName, huntInfo, "setup", 0, #waypoints, postPos, templePos, "TELEPORT_RESULT", string.format("teleport ret=%s, tile=%s, ground=%s, walkable=%s, creatures=%d, landed at (%d,%d,%d)", tostring(ok), tostring(tTile ~= nil), tostring(tGround ~= nil), tostring(tWalk), tCreatures, postPos.x, postPos.y, postPos.z))
-	HuntTester.logEvent("INFO", workerName, huntInfo, "setup", 0, #waypoints, postPos, templePos, "TELEPORT_RESULT", string.format("Worker landed at (%d,%d,%d)", postPos.x, postPos.y, postPos.z))
+
+	if not ok or not tGround or not tWalk then
+		HuntTester.recordReport(workerName, huntInfo, "BUGGED",
+			string.format("Entrada da cave inacessivel ou tile bloqueado em (%d,%d,%d)", postPos.x, postPos.y, postPos.z),
+			postPos.x, postPos.y, postPos.z, 0, #waypoints, 0, mode)
+		HuntTester.dispatchNextHuntForWorker(workerName)
+		return
+	end
 
 	local state = {
 		workerName = workerName,
 		huntId = huntId,
 		huntInfo = huntInfo,
+		mode = mode,
 		hasQuestAccess = hasAccess,
 		questAccessSummary = accessSummary,
 		waypoints = waypoints,
 		currentWpIndex = 1,
-		currentPhase = waypoints[1].phase or "travel_to",
+		currentPhase = "hunt_patrol",
 		completedWaypoints = 0,
 		huntStartTime = os.time(),
 		wpStartTime = os.time(),
@@ -684,8 +744,8 @@ function HuntTester.dispatchNextHuntForWorker(workerName)
 	HuntTester.activeWorkers[workerName] = state
 
 	HuntTester.broadcast(string.format(
-		"[%s] Iniciando Hunt [%d] '%s' (%s) | %d waypoints no ciclo completo",
-		workerName, huntId, huntInfo.name, huntInfo.town_name, #waypoints
+		"[%s] [%s] Iniciando Hunt [%d] '%s' (%s) na cave | %d waypoints de patrulha",
+		workerName, mode:upper(), huntId, huntInfo.name, huntInfo.town_name, #waypoints
 	))
 
 	-- Start tick loop for this worker
@@ -716,28 +776,94 @@ function HuntTester.workerTick(workerName)
 		-- Re-load worker if disconnected
 		player = HuntTester.getOrLoadWorker(workerName)
 		if not player then
-			HuntTester.scheduleWorkerTick(workerName, 1000)
+			HuntTester.scheduleWorkerTick(workerName, 400)
 			return
 		end
 	end
 
 	-- Check if player is currently performing an auto-walk step
 	if player.isWalking and player:isWalking() then
-		HuntTester.scheduleWorkerTick(workerName, 150)
+		HuntTester.scheduleWorkerTick(workerName, 80)
+		return
+	end
+
+	-- Resupply Mode / Subphase handler (drives real town resupply loop)
+	if state.mode == "resupply" or state.subphase == "resupply" then
+		local s = BotState and BotState[player:getGuid()]
+		if not s then
+			HuntTester.recordReport(workerName, state.huntInfo, "BUGGED", "BotState inexistente no resupply", 0, 0, 0, 0, 1, 0, state.mode)
+			HuntTester.dispatchNextHuntForWorker(workerName)
+			return
+		end
+
+		local elapsed = os.time() - (state.resupplyStartTime or os.time())
+		if elapsed > 180 then
+			HuntTester.recordReport(workerName, state.huntInfo, "TIMEOUT",
+				string.format("Timeout no resupply (%ds) no step: %s", elapsed, tostring(s.resupplyStep)),
+				player:getPosition().x, player:getPosition().y, player:getPosition().z,
+				elapsed, 1, 0, state.mode)
+			HuntTester.dispatchNextHuntForWorker(workerName)
+			return
+		end
+
+		if s.resupplyStep == "done" then
+			-- Completed resupply! Teleport back to cave entrance to prove complete round-trip!
+			local patrolWps = BotSystem.getResolvedHuntWaypoints(player, state.huntId, "hunt_patrol")
+			if patrolWps and #patrolWps > 0 then
+				local caveEntrance = Position(patrolWps[1].pos_x, patrolWps[1].pos_y, patrolWps[1].pos_z)
+				player:teleportTo(caveEntrance, true)
+				local curPos = player:getPosition()
+				HuntTester.logEvent("DONE", workerName, state.huntInfo, "resupply", 1, 1, curPos, caveEntrance, "RESUPPLY_COMPLETE",
+					string.format("Resupply completo em %ds. Retornado a cave (%d,%d,%d)", elapsed, curPos.x, curPos.y, curPos.z))
+			end
+			local totalDur = os.time() - state.huntStartTime
+			HuntTester.recordReport(workerName, state.huntInfo, "ACCESSIBLE", nil, 0, 0, 0, totalDur, 1, 1, state.mode)
+			HuntTester.dispatchNextHuntForWorker(workerName)
+			return
+		end
+
+		-- Advance resupply state machine
+		BotSystem.doHuntResupply(player, s)
+		HuntTester.scheduleWorkerTick(workerName, 250)
 		return
 	end
 
 	local wp = state.waypoints[state.currentWpIndex]
 	if not wp then
+		if state.mode == "full" and not state.subphase then
+			-- Mode full: Patrol phase done! Now transition to Resupply in Town
+			state.subphase = "resupply"
+			state.resupplyStartTime = os.time()
+			local templePos = HuntTester.getTemplePosition(state.huntInfo.town_id, state.huntInfo.town_name)
+			player:teleportTo(templePos, true)
+			if BotSystem and BotSystem.initBot then BotSystem.initBot(player) end
+			local s = BotState and BotState[player:getGuid()]
+			if s then
+				s.huntTownId = state.huntInfo.town_id
+				s.huntScriptId = state.huntId
+				s.personality = 2
+			end
+			if player.getBankBalance and player:getBankBalance() < 10000 then player:setBankBalance(20000) end
+			if player.getItemCount and player:getItemCount(3031) == 0 then player:addItem(3031, 100) end
+			if BotSystem and BotSystem.beginHuntPhase then
+				BotSystem.beginHuntPhase(player, s, HUNT_PHASE.RESUPPLYING)
+			end
+			HuntTester.logEvent("STEP", workerName, state.huntInfo, "full", #state.waypoints, #state.waypoints, player:getPosition(), templePos, "FULL_TO_RESUPPLY",
+				"Patrol na cave concluido com sucesso! Teleportado ao templo para testar resupply real.")
+			HuntTester.scheduleWorkerTick(workerName, 200)
+			return
+		end
+
 		-- All waypoints completed successfully!
 		local duration = os.time() - state.huntStartTime
-		HuntTester.logEvent("DONE", workerName, state.huntInfo, state.currentPhase, #state.waypoints, #state.waypoints, curPos, nil, "HUNT_COMPLETE", string.format("Hunt ACCESSIBLE! Duration: %ds, completed: %d/%d", duration, state.completedWaypoints, #state.waypoints))
-		HuntTester.recordReport(workerName, state.huntInfo, "ACCESSIBLE", nil, nil, nil, nil, duration, #state.waypoints, state.completedWaypoints)
+		local curPos = player:getPosition()
+		HuntTester.logEvent("DONE", workerName, state.huntInfo, state.currentPhase or "hunt_patrol", #state.waypoints, #state.waypoints, curPos, nil, "HUNT_COMPLETE", string.format("Hunt ACCESSIBLE! Duration: %ds, completed: %d/%d", duration, state.completedWaypoints, #state.waypoints))
+		HuntTester.recordReport(workerName, state.huntInfo, "ACCESSIBLE", nil, nil, nil, nil, duration, #state.waypoints, state.completedWaypoints, state.mode)
 		HuntTester.dispatchNextHuntForWorker(workerName)
 		return
 	end
 
-	state.currentPhase = wp.phase or "travel_to"
+	state.currentPhase = wp.phase or "hunt_patrol"
 	local curPos = player:getPosition()
 	local targetPos = Position(wp.pos_x, wp.pos_y, wp.pos_z)
 
@@ -773,7 +899,7 @@ function HuntTester.workerTick(workerName)
 		local duration = os.time() - state.huntStartTime
 		HuntTester.logDiagnosticSnapshot(workerName, state.huntInfo, state.currentPhase, state.currentWpIndex, #state.waypoints, curPos, targetPos, failureReason)
 		HuntTester.logEvent("TIMEOUT", workerName, state.huntInfo, state.currentPhase, state.currentWpIndex, #state.waypoints, curPos, targetPos, "TIMEOUT_TRIGGERED", failureReason)
-		HuntTester.recordReport(workerName, state.huntInfo, "TIMEOUT", failureReason, curPos.x, curPos.y, curPos.z, duration, #state.waypoints, state.completedWaypoints)
+		HuntTester.recordReport(workerName, state.huntInfo, "TIMEOUT", failureReason, curPos.x, curPos.y, curPos.z, duration, #state.waypoints, state.completedWaypoints, state.mode)
 		HuntTester.dispatchNextHuntForWorker(workerName)
 		return
 	end
@@ -871,7 +997,7 @@ function HuntTester.workerTick(workerName)
 			HuntTester.logEvent("STEP", workerName, state.huntInfo, state.currentPhase, state.currentWpIndex, #state.waypoints, curPos, exitPos, "QUEST_TEMPLE_EXIT", "Using Yalahar Temple exit teleporter to (32786,31248,7)")
 			player:teleportTo(exitPos, true)
 			state.lastProgressTime = os.time()
-			HuntTester.scheduleWorkerTick(workerName, 600)
+			HuntTester.scheduleWorkerTick(workerName, 200)
 			return
 		elseif isYalaharTempleExit or isEdronTempleExit or isFeyristShrineToCave or isFeyristReturnShrine or isFarmineElevator or isFirstWpQuestJump or isPhaseStartQuestJump then
 			HuntTester.logEvent("STEP", workerName, state.huntInfo, state.currentPhase, state.currentWpIndex, #state.waypoints, curPos, targetPos, "QUEST_ACCESS_TRANSIT", string.format("Quest-unlocked transition [%s] to (%d,%d,%d)", state.questAccessSummary or "TempleExit", targetPos.x, targetPos.y, targetPos.z))
@@ -880,7 +1006,7 @@ function HuntTester.workerTick(workerName)
 			if afterPos.z == targetPos.z and math.abs(afterPos.x - targetPos.x) <= 3 and math.abs(afterPos.y - targetPos.y) <= 3 then
 				state.lastProgressTime = os.time()
 			end
-			HuntTester.scheduleWorkerTick(workerName, 600)
+			HuntTester.scheduleWorkerTick(workerName, 200)
 			return
 		end
 	end
@@ -1172,12 +1298,14 @@ function HuntTester.handleFloorTransition(player, curPos, wp)
 end
 
 -- Record report into MariaDB and local list
-function HuntTester.recordReport(workerName, huntInfo, status, reason, fx, fy, fz, duration, totalWps, completedWps)
+function HuntTester.recordReport(workerName, huntInfo, status, reason, fx, fy, fz, duration, totalWps, completedWps, mode)
+	mode = mode or HuntTester.mode or "full"
 	local report = {
 		tester_name = workerName,
 		hunt_id = huntInfo.id,
 		hunt_name = huntInfo.name,
 		town_name = huntInfo.town_name,
+		test_mode = mode,
 		status = status,
 		failure_reason = reason,
 		failure_pos_x = fx,
@@ -1194,6 +1322,7 @@ function HuntTester.recordReport(workerName, huntInfo, status, reason, fx, fy, f
 	local workerEscaped = db.escapeString(workerName)
 	local nameEscaped = db.escapeString(huntInfo.name)
 	local townEscaped = db.escapeString(huntInfo.town_name)
+	local modeEscaped = db.escapeString(mode)
 	local statusEscaped = db.escapeString(status)
 	local reasonEscaped = reason and db.escapeString(reason) or "NULL"
 	local fxVal = fx and tostring(fx) or "NULL"
@@ -1202,9 +1331,9 @@ function HuntTester.recordReport(workerName, huntInfo, status, reason, fx, fy, f
 
 	local insertSql = string.format(
 		"INSERT INTO `bot_hunt_test_reports` " ..
-		"(`tester_name`, `hunt_id`, `hunt_name`, `town_name`, `status`, `failure_reason`, `failure_pos_x`, `failure_pos_y`, `failure_pos_z`, `duration_seconds`, `waypoints_total`, `waypoints_completed`) " ..
-		"VALUES (%s, %d, %s, %s, %s, %s, %s, %s, %s, %.2f, %d, %d)",
-		workerEscaped, huntInfo.id, nameEscaped, townEscaped,
+		"(`tester_name`, `hunt_id`, `hunt_name`, `town_name`, `test_mode`, `status`, `failure_reason`, `failure_pos_x`, `failure_pos_y`, `failure_pos_z`, `duration_seconds`, `waypoints_total`, `waypoints_completed`) " ..
+		"VALUES (%s, %d, %s, %s, %s, %s, %s, %s, %s, %s, %.2f, %d, %d)",
+		workerEscaped, huntInfo.id, nameEscaped, townEscaped, modeEscaped,
 		statusEscaped, reasonEscaped, fxVal, fyVal, fzVal, duration or 0, totalWps or 0, completedWps or 0
 	)
 	db.asyncQuery(insertSql)
@@ -1219,8 +1348,8 @@ function HuntTester.recordReport(workerName, huntInfo, status, reason, fx, fy, f
 	local statusSymbol = (status == "ACCESSIBLE") and "[OK - ACESSIVEL]" or ("[FALHA - " .. status .. "]")
 	local posStr = (fx and fy and fz) and string.format(" em (%d,%d,%d)", fx, fy, fz) or ""
 	HuntTester.broadcast(string.format(
-		"[%s] Concluida Hunt [%d] '%s' -> %s (Duracao: %.1fs, Wps: %d/%d)%s%s",
-		workerName, huntInfo.id, huntInfo.name, statusSymbol, duration or 0, completedWps or 0, totalWps or 0,
+		"[%s] [%s] Concluida Hunt [%d] '%s' -> %s (Duracao: %.1fs, Wps: %d/%d)%s%s",
+		workerName, mode:upper(), huntInfo.id, huntInfo.name, statusSymbol, duration or 0, completedWps or 0, totalWps or 0,
 		posStr, reason and (" | Motivo: " .. reason:sub(1, 60) .. "...") or ""
 	))
 
@@ -1231,6 +1360,7 @@ end
 -- Called when all queued tests complete
 function HuntTester.onTestingCompleted()
 	HuntTester.running = false
+	HuntTester.releaseAllWorkers()
 	db.asyncQuery("UPDATE `bot_hunt_test_commands` SET `status` = 'COMPLETED' WHERE `status` = 'RUNNING'")
 	local elapsed = os.time() - HuntTester.startTime
 	local total = #HuntTester.reports
@@ -1259,7 +1389,7 @@ function HuntTester.generateMarkdownReport()
 
 	-- Query all latest reports from MariaDB for comprehensive multi-run overview
 	local res = db.storeQuery([[
-		SELECT r.hunt_id, r.hunt_name, r.town_name, r.status, r.failure_reason,
+		SELECT r.hunt_id, r.hunt_name, r.town_name, r.test_mode, r.status, r.failure_reason,
 		       r.failure_pos_x, r.failure_pos_y, r.failure_pos_z,
 		       r.duration_seconds, r.waypoints_total, r.waypoints_completed, r.tester_name, r.tested_at
 		FROM bot_hunt_test_reports r
@@ -1278,6 +1408,7 @@ function HuntTester.generateMarkdownReport()
 				hunt_id = Result.getNumber(res, "hunt_id"),
 				hunt_name = Result.getString(res, "hunt_name"),
 				town_name = Result.getString(res, "town_name"),
+				test_mode = Result.getString(res, "test_mode"),
 				status = Result.getString(res, "status"),
 				failure_reason = Result.getString(res, "failure_reason"),
 				failure_pos_x = Result.getNumber(res, "failure_pos_x"),
@@ -1353,29 +1484,29 @@ function HuntTester.generateMarkdownReport()
 	if failCount == 0 then
 		file:write("*Nenhuma hunt apresentou falha ou bloqueio!*\n\n")
 	else
-		file:write("| ID | Hunt | Cidade | Status | Coordenada Falha (X,Y,Z) | Waypoints | Motivo do Bloqueio |\n")
-		file:write("| :---: | :--- | :--- | :---: | :---: | :---: | :--- |\n")
+		file:write("| ID | Hunt | Cidade | Modo | Status | Coordenada Falha (X,Y,Z) | Waypoints | Motivo do Bloqueio |\n")
+		file:write("| :---: | :--- | :--- | :---: | :---: | :---: | :---: | :--- |\n")
 		for _, r in ipairs(allReports) do
 			if r.status ~= "ACCESSIBLE" then
 				local coord = (r.failure_pos_x and r.failure_pos_x > 0) and string.format("(%d, %d, %d)", r.failure_pos_x, r.failure_pos_y, r.failure_pos_z) or "N/D"
 				local wpsProg = string.format("%d/%d", r.waypoints_completed or 0, r.waypoints_total or 0)
 				local reasonClean = (r.failure_reason or "Desconhecido"):gsub("\n", " "):gsub("|", "/")
-				file:write(string.format("| %d | %s | %s | **%s** | `%s` | %s | %s |\n",
-					r.hunt_id, r.hunt_name, r.town_name, r.status, coord, wpsProg, reasonClean))
+				file:write(string.format("| %d | %s | %s | %s | **%s** | `%s` | %s | %s |\n",
+					r.hunt_id, r.hunt_name, r.town_name, (r.test_mode or "full"):upper(), r.status, coord, wpsProg, reasonClean))
 			end
 		end
 		file:write("\n")
 	end
 
 	file:write("## 4. Hunts Acessiveis Confirmadas (Amostra / Resumo)\n\n")
-	file:write("| ID | Hunt | Cidade | Waypoints Ciclo | Duracao (s) | Tester |\n")
-	file:write("| :---: | :--- | :--- | :---: | :---: | :---: |\n")
+	file:write("| ID | Hunt | Cidade | Modo | Waypoints Ciclo | Duracao (s) | Tester |\n")
+	file:write("| :---: | :--- | :--- | :---: | :---: | :---: | :---: |\n")
 	local accCount = 0
 	for _, r in ipairs(allReports) do
 		if r.status == "ACCESSIBLE" then
 			accCount = accCount + 1
-			file:write(string.format("| %d | %s | %s | %d | %.1fs | %s |\n",
-				r.hunt_id, r.hunt_name, r.town_name, r.waypoints_total, r.duration_seconds or 0, r.tester_name or "Tester"))
+			file:write(string.format("| %d | %s | %s | %s | %d | %.1fs | %s |\n",
+				r.hunt_id, r.hunt_name, r.town_name, (r.test_mode or "full"):upper(), r.waypoints_total, r.duration_seconds or 0, r.tester_name or "Tester"))
 		end
 	end
 	if accCount == 0 then

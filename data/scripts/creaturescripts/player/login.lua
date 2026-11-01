@@ -5,6 +5,20 @@ end
 local playerLoginGlobal = CreatureEvent("PlayerLoginGlobal")
 
 function playerLoginGlobal.onLogin(player)
+	-- Headless bot players do not have client windows, packets, or retention trackers
+	if player.isBotPlayer and player:isBotPlayer() then
+		player:registerEvent("PlayerDeath")
+		player:registerEvent("DropLoot")
+		local vocation = player:getVocation()
+		if vocation and vocation:getBaseId() == VOCATION.BASE_ID.MONK then
+			local kv = player:kv()
+			if (kv:get("monk-basic-atk-bonus") or 0) < 10 then
+				kv:set("monk-basic-atk-bonus", 10)
+			end
+		end
+		return true
+	end
+
 	-- Welcome
 	local loginStr
 	if player:getLastLoginSaved() == 0 then
@@ -170,6 +184,9 @@ function playerLoginGlobal.onLogin(player)
 
 	-- Load the server-side quest tracker after the client has finished entering the game.
 	-- The tracker is persisted in player KV and no longer depends only on client cache.
+	local trackerLoadDelay = (QuestTrackerServerConfig and QuestTrackerServerConfig.loginLoadDelay) or 500
+	local trackerSyncWindow = (QuestTrackerServerConfig and QuestTrackerServerConfig.initialSyncWindow) or 3000
+
 	addEvent(function(playerId)
 		local loginPlayer = Player(playerId)
 		if not loginPlayer then
@@ -183,7 +200,7 @@ function playerLoginGlobal.onLogin(player)
 		if loginPlayer.updateQuestTrackerKnownQuests then
 			loginPlayer:updateQuestTrackerKnownQuests(false)
 		end
-	end, QuestTrackerServerConfig.loginLoadDelay, playerId)
+	end, trackerLoadDelay, playerId)
 
 	-- Safety fallback: keep a short window where empty client cache packets
 	-- cannot wipe the server-side tracker loaded from KV.
@@ -195,7 +212,7 @@ function playerLoginGlobal.onLogin(player)
 		if loginPlayer.finishQuestTrackerInitialSync then
 			loginPlayer:finishQuestTrackerInitialSync()
 		end
-	end, QuestTrackerServerConfig.initialSyncWindow, playerId)
+	end, trackerSyncWindow, playerId)
 
 	if vocation and vocation:getBaseId() == VOCATION.BASE_ID.MONK then
 		local kv = player:kv()

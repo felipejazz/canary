@@ -1,8 +1,13 @@
 local removeEmptyParcelsEvent = CreatureEvent("RemoveEmptyParcelsOnLogin")
 
 function removeEmptyParcelsEvent.onLogin(player)
+	local storeInbox = player:getStoreInbox()
+	if not storeInbox then
+		return true
+	end
+
 	local emptyParcelsToRemove = {}
-	for _, parcel in ipairs(player:getStoreInbox():getItems(true)) do
+	for _, parcel in ipairs(storeInbox:getItems(true)) do
 		if parcel:getId() == ITEM_PARCEL_STAMPED and parcel:getEmptySlots() == 10 then
 			table.insert(emptyParcelsToRemove, parcel)
 		end

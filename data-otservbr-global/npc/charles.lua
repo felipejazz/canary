@@ -60,7 +60,7 @@ end
 
 local shortcuts = {
 	["thais"] = { price = 100, position = Position(32310, 32210, 6) },
-	["edron"] = { price = 90, position = Position(33173, 31764, 6) },
+	["edron"] = { price = 90, position = Position(33175, 31764, 6) },
 	["liberty bay"] = { price = 20, position = Position(32285, 32891, 6) },
 	["yalahar"] = { price = 200, position = Position(32816, 31272, 6) },
 }
@@ -110,27 +110,30 @@ local function creatureSayCallback(npc, creature, type, message)
 				npcHandler:say("You don't have enough money.", npc, creature)
 			end
 		end
-	else
-		local function addTravelKeyword(keyword, cost, destination, condition)
-			if condition then
-				keywordHandler:addKeyword({ keyword }, StdModule.say, { npcHandler = npcHandler, text = "I'm sorry but I don't sail there." }, condition)
-			end
-			local travelKeyword = keywordHandler:addKeyword({ keyword }, StdModule.say, { npcHandler = npcHandler, text = "Do you seek a passage to " .. keyword:titleCase() .. " for |TRAVELCOST|?", cost = cost, discount = "postman" })
-			travelKeyword:addChildKeyword({ "yes" }, StdModule.travel, { npcHandler = npcHandler, premium = false, cost = cost, discount = "postman", destination = destination })
-			travelKeyword:addChildKeyword({ "no" }, StdModule.say, { npcHandler = npcHandler, text = "We would like to serve you some time.", reset = true })
-		end
-		addTravelKeyword("edron", 150, Position(33173, 31764, 6))
-		addTravelKeyword("venore", 160, Position(32954, 32022, 6))
-		addTravelKeyword("yalahar", 260, Position(32816, 31272, 6), function(player)
-			return player:getStorageValue(Storage.Quest.U8_4.InServiceOfYalahar.SearoutesAroundYalahar.PortHope) ~= 1 and player:getStorageValue(Storage.Quest.U8_4.InServiceOfYalahar.SearoutesAroundYalahar.TownsCounter) < 5
-		end)
-		addTravelKeyword("ankrahmun", 110, Position(33092, 32883, 6))
-		addTravelKeyword("darashia", 180, Position(33289, 32480, 6))
-		addTravelKeyword("thais", 160, Position(32310, 32210, 6))
-		addTravelKeyword("liberty bay", 50, Position(32285, 32892, 6))
-		addTravelKeyword("carlin", 120, Position(32387, 31820, 6))
 	end
+	return true
 end
+
+-- Travel
+local function addTravelKeyword(keyword, cost, destination, condition)
+	if condition then
+		keywordHandler:addKeyword({ keyword }, StdModule.say, { npcHandler = npcHandler, text = "I'm sorry but I don't sail there." }, condition)
+	end
+	local travelKeyword = keywordHandler:addKeyword({ keyword }, StdModule.say, { npcHandler = npcHandler, text = "Do you seek a passage to " .. keyword:titleCase() .. " for |TRAVELCOST|?", cost = cost, discount = "postman" })
+	travelKeyword:addChildKeyword({ "yes" }, StdModule.travel, { npcHandler = npcHandler, premium = false, cost = cost, discount = "postman", destination = destination })
+	travelKeyword:addChildKeyword({ "no" }, StdModule.say, { npcHandler = npcHandler, text = "We would like to serve you some time.", reset = true })
+end
+
+addTravelKeyword("edron", 150, Position(33175, 31764, 6))
+addTravelKeyword("venore", 160, Position(32954, 32022, 6))
+addTravelKeyword("yalahar", 260, Position(32816, 31272, 6), function(player)
+	return player:getStorageValue(Storage.Quest.U8_4.InServiceOfYalahar.SearoutesAroundYalahar.PortHope) ~= 1 and player:getStorageValue(Storage.Quest.U8_4.InServiceOfYalahar.SearoutesAroundYalahar.TownsCounter) < 5
+end)
+addTravelKeyword("ankrahmun", 110, Position(33092, 32883, 6))
+addTravelKeyword("darashia", 180, Position(33289, 32480, 6))
+addTravelKeyword("thais", 160, Position(32310, 32210, 6))
+addTravelKeyword("liberty bay", 50, Position(32285, 32892, 6))
+addTravelKeyword("carlin", 120, Position(32387, 31820, 6))
 
 keywordHandler:addKeyword({ "kick" }, StdModule.kick, { npcHandler = npcHandler, destination = { Position(32535, 32792, 6), Position(32536, 32778, 6) } })
 keywordHandler:addKeyword({ "sail" }, StdModule.say, { npcHandler = npcHandler, text = "Where do you want to go - {Thais}, {Darashia}, {Venore}, {Liberty Bay}, {Ankrahmun}, {Yalahar} or {Edron?}" })

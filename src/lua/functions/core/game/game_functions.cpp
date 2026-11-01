@@ -846,9 +846,13 @@ int GameFunctions::luaGameLoadBotPlayer(lua_State* L) {
 	// If already online, return existing
 	auto existing = g_game().getPlayerByName(name);
 	if (existing) {
-		Lua::pushUserdata<Player>(L, existing);
-		Lua::setMetatable(L, -1, "Player");
-		return 1;
+		if (existing->isRemoved()) {
+			g_game().removePlayer(existing);
+		} else {
+			Lua::pushUserdata<Player>(L, existing);
+			Lua::setMetatable(L, -1, "Player");
+			return 1;
+		}
 	}
 
 	// Create player with no client connection

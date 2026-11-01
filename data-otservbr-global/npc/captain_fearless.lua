@@ -74,7 +74,7 @@ addTravelKeyword("krailos", 185, Position(33493, 31712, 6)) -- {x = 33493, y = 3
 addTravelKeyword("carlin", 130, Position(32387, 31820, 6))
 addTravelKeyword("gray island", 150, Position(33196, 31984, 7))
 addTravelKeyword("ab'dendriel", 90, Position(32734, 31668, 6))
-addTravelKeyword("edron", 40, Position(33173, 31764, 6))
+addTravelKeyword("edron", 40, Position(33175, 31764, 6))
 addTravelKeyword("port hope", 160, Position(32527, 32784, 6))
 addTravelKeyword("svargrond", 150, Position(32341, 31108, 6))
 addTravelKeyword("liberty bay", 180, Position(32285, 32892, 6))

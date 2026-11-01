@@ -1609,10 +1609,13 @@ bool Game::removeCreature(const std::shared_ptr<Creature> &creature, bool isLogo
 		removeCreature(summon);
 	}
 
-	if (creature->getPlayer() && isLogout) {
-		auto it = teamFinderMap.find(creature->getPlayer()->getGUID());
-		if (it != teamFinderMap.end()) {
-			teamFinderMap.erase(it);
+	if (const auto &player = creature->getPlayer()) {
+		removePlayer(player);
+		if (isLogout) {
+			auto it = teamFinderMap.find(player->getGUID());
+			if (it != teamFinderMap.end()) {
+				teamFinderMap.erase(it);
+			}
 		}
 	}
 
@@ -4150,6 +4153,10 @@ Slots_t getSlotType(const ItemType &it) {
 			slot = CONST_SLOT_AMMO;
 		} else if (slotPosition & SLOTP_TWO_HAND || slotPosition & SLOTP_LEFT) {
 			slot = CONST_SLOT_LEFT;
+		} else if (it.transformEquipTo != 0) {
+			return getSlotType(Item::items[it.transformEquipTo]);
+		} else if (it.transformDeEquipTo != 0) {
+			return getSlotType(Item::items[it.transformDeEquipTo]);
 		}
 	}
 
@@ -4200,15 +4207,55 @@ void Game::playerEquipItem(uint32_t playerId, uint16_t itemId, bool hasTier /* =
 	const auto &backpack = item ? item->getContainer() : nullptr;
 
 	const auto &slotItem = player->getInventoryItem(slot);
-	auto equipItem = searchForItem(backpack, it.id, hasTier, tier);
-	if (!equipItem) {
-		const auto &lootPouch = player->getLootPouch();
-		equipItem = searchForItem(lootPouch, it.id, hasTier, tier);
+
+	auto findItemToEquip = [&](uint16_t id) -> std::shared_ptr<Item> {
+		if (id == 0) {
+			return nullptr;
+		}
+		auto found = searchForItem(backpack, id, hasTier, tier);
+		if (found) {
+			return found;
+		}
+		found = searchForItem(player->getLootPouch(), id, hasTier, tier);
+		if (found) {
+			return found;
+		}
+		if (slot != CONST_SLOT_AMMO) {
+			const auto &ammoItem = player->getInventoryItem(CONST_SLOT_AMMO);
+			if (ammoItem && ammoItem->getID() == id && (!hasTier || ammoItem->getTier() == tier)) {
+				return ammoItem;
+			}
+		}
+		return nullptr;
+	};
+
+	auto equipItem = findItemToEquip(it.id);
+	if (!equipItem && it.transformEquipTo != 0) {
+		equipItem = findItemToEquip(it.transformEquipTo);
+	}
+	if (!equipItem && it.transformDeEquipTo != 0) {
+		equipItem = findItemToEquip(it.transformDeEquipTo);
 	}
 	ReturnValue ret = RETURNVALUE_NOERROR;
 
-	if (slotItem && slotItem->getID() == it.id && (!hasTier || slotItem->getTier() == tier)) {
+	bool isEquippedSame = false;
+	if (slotItem) {
+		const ItemType &slotIt = Item::items[slotItem->getID()];
+		if (slotItem->getID() == it.id ||
+		    (it.transformEquipTo != 0 && slotItem->getID() == it.transformEquipTo) ||
+		    (slotIt.transformDeEquipTo != 0 && (slotIt.transformDeEquipTo == it.id || (it.transformDeEquipTo != 0 && slotIt.transformDeEquipTo == it.transformDeEquipTo))) ||
+		    (it.transformEquipTo != 0 && slotIt.transformEquipTo == it.transformEquipTo && slotIt.transformEquipTo != 0)) {
+			if (!hasTier || slotItem->getTier() == tier) {
+				isEquippedSame = true;
+			}
+		}
+	}
+
+	if (isEquippedSame) {
 		ret = internalCollectManagedItems(player, slotItem, getObjectCategory(slotItem), false);
+		if (ret != RETURNVALUE_NOERROR) {
+			ret = internalMoveItem(slotItem->getParent(), player, INDEX_WHEREEVER, slotItem, slotItem->getItemCount(), nullptr);
+		}
 	} else if (equipItem) {
 		// Shield slot item
 		const auto &rightItem = player->getInventoryItem(CONST_SLOT_RIGHT);

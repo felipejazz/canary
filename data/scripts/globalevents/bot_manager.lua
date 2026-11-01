@@ -91,11 +91,9 @@ function botStartup.onStartup()
 	-- Ensure staging tile exists for brand-new bots that have no prior loginPosition
 	Game.createTile(Position(31970, 32283, 7), true)
 
-	-- Query all bot characters ordered by id ASC (= level ASC, since bots are seeded sorted by level).
-	-- We fetch all then stratify in Lua so any TARGET_ONLINE < total still covers the full
-	-- level/vocation range (otherwise LIMIT N would clip to the lowest-level slice).
-	local query = "SELECT `id`, `name` FROM `players` WHERE (`account_id` = " .. BOT_CONFIG.BOT_ACCOUNT_ID
-		.. " OR `name` LIKE 'Bot %') AND `deletion` = 0 ORDER BY `id` ASC"
+	-- Query all bot characters ordered by level DESC, experience DESC (top level bots first).
+	local query = "SELECT `id`, `name`, `level`, `experience` FROM `players` WHERE (`account_id` = " .. BOT_CONFIG.BOT_ACCOUNT_ID
+		.. " OR `name` LIKE 'Bot %') AND `deletion` = 0 ORDER BY `level` DESC, `experience` DESC"
 
 	local resultId = db.storeQuery(query)
 
@@ -111,9 +109,6 @@ function botStartup.onStartup()
 	until not Result.next(resultId)
 	Result.free(resultId)
 
-	-- Stratified selection: evenly-spaced indices across [1, total] so we get diverse levels
-	-- + vocations regardless of TARGET_ONLINE. Deterministic across restarts so
-	-- bot_state_persistence rows stay coherent.
 	local total = #allBotNames
 	local target = BOT_CONFIG.TARGET_ONLINE
 	if configKeys and configKeys.BOT_PLAYERS_ONLINE then
@@ -122,75 +117,30 @@ function botStartup.onStartup()
 			if cfgVal and cfgVal > 0 then target = cfgVal end
 		end)
 	end
+
+	-- Restore persisted debug_active_count if set
+	local cfgRes = db.storeQuery("SELECT `config_value` FROM `bot_startup_config` WHERE `config_key` = 'debug_active_count'")
+	if cfgRes then
+		local dVal = tonumber(Result.getString(cfgRes, "config_value"))
+		Result.free(cfgRes)
+		if dVal and dVal > 0 then
+			target = dVal
+		end
+	end
+
 	local botNames = {}
-
-	if target <= 5 then
-		local preferredTestBots = { "Bot Titus", "Bot Kallum", "Bot Eamon", "Bot Valdemar", "Bot Sylas" }
-		local inDb = {}
-		for _, n in ipairs(allBotNames) do inDb[n] = true end
-		for _, pref in ipairs(preferredTestBots) do
-			if #botNames < target and inDb[pref] then
-				table.insert(botNames, pref)
-			end
-		end
+	local maxPick = math.min(target, total)
+	for i = 1, maxPick do
+		table.insert(botNames, allBotNames[i])
 	end
 
-	-- 2026-05-28 test override: when target == 1 AND BOT_CONFIG.SINGLE_BOT_NAME is set,
-	-- load that specific bot (useful for isolated cast-watch perf testing on a chosen
-	-- high-level character rather than the lowest-id bot stratification picker would return).
-	if #botNames == 0 and target == 1 and BOT_CONFIG.SINGLE_BOT_NAME and BOT_CONFIG.SINGLE_BOT_NAME ~= "" then
-		local found = false
-		for _, n in ipairs(allBotNames) do
-			if n == BOT_CONFIG.SINGLE_BOT_NAME then
-				table.insert(botNames, n)
-				found = true
-				break
-			end
-		end
-		if not found then
-			logger.warn("[BotManager] SINGLE_BOT_NAME '" .. BOT_CONFIG.SINGLE_BOT_NAME ..
-				"' not in DB; falling back to stratified pick")
-		end
+	-- Override for single bot test if explicitly configured
+	if target == 1 and BOT_CONFIG.SINGLE_BOT_NAME and BOT_CONFIG.SINGLE_BOT_NAME ~= "" then
+		botNames = { BOT_CONFIG.SINGLE_BOT_NAME }
 	end
 
-	if #botNames == 0 then
-		if target >= total then
-			botNames = allBotNames
-		else
-			for i = 0, target - 1 do
-				local idx = math.floor(i * total / target) + 1
-				table.insert(botNames, allBotNames[idx])
-			end
-		end
-
-		-- 2026-05-28 extension: when target > 1 AND SINGLE_BOT_NAME is set, ensure the
-		-- named bot is in the picked set. If missing, replace the last entry with it.
-		-- Keeps the stratified diversity while guaranteeing the cast-watched bot is loaded.
-		if target > 1 and BOT_CONFIG.SINGLE_BOT_NAME and BOT_CONFIG.SINGLE_BOT_NAME ~= "" then
-			local already = false
-			for _, n in ipairs(botNames) do
-				if n == BOT_CONFIG.SINGLE_BOT_NAME then already = true; break end
-			end
-			if not already then
-				-- Verify the named bot exists in DB
-				local existsInDB = false
-				for _, n in ipairs(allBotNames) do
-					if n == BOT_CONFIG.SINGLE_BOT_NAME then existsInDB = true; break end
-				end
-				if existsInDB then
-					botNames[#botNames] = BOT_CONFIG.SINGLE_BOT_NAME
-					logger.info("[BotManager] Forced inclusion of '" .. BOT_CONFIG.SINGLE_BOT_NAME ..
-						"' replacing last stratified pick")
-				else
-					logger.warn("[BotManager] SINGLE_BOT_NAME '" .. BOT_CONFIG.SINGLE_BOT_NAME ..
-						"' not in DB; using stratified pick as-is")
-				end
-			end
-		end
-	end
-
-	logger.info("[BotManager] Found " .. total .. " bots in database, loading "
-		.. #botNames .. " (stratified across level/vocation) as INACTIVE...")
+	logger.info("[BotManager] Found " .. total .. " bots in database, loading top "
+		.. #botNames .. " by level (descending) as INACTIVE...")
 
 	-- Load bots with staggered timing to avoid startup spike (100ms per bot)
 	for i, name in ipairs(botNames) do
@@ -306,8 +256,73 @@ botStartup:register()
 local BOT_CMD_RESULT_MAX = 32000
 
 local botManager = GlobalEvent("BotManager")
+local lastBotWatchdogCheck = 0
 
 function botManager.onThink(interval)
+	-- Liveness Watchdog: periodically inspect loaded bots and revive inactive ones (every 10s)
+	local now = os.time()
+	if not lastBotWatchdogCheck or (now - lastBotWatchdogCheck) >= 10 then
+		lastBotWatchdogCheck = now
+
+		-- 1. Inspect all instantiated bot players in the engine
+		local onlineCount = 0
+		for _, player in ipairs(Game.getPlayers()) do
+			if player:isBotPlayer() and not player:isRemoved()
+				and not (BotSystem.isHuntTesterWorker and BotSystem.isHuntTesterWorker(player:getGuid())) then
+				onlineCount = onlineCount + 1
+				local guid = player:getGuid()
+				BotPlayers[guid] = player
+				local isInactive = (not BotActive or not BotActive[guid])
+				local missingThink = (not botThinkEvents or not botThinkEvents[guid])
+				if isInactive or missingThink then
+					logger.warn(string.format("[BotWatchdog] Bot %s (GUID %d) found inactive (BotActive=%s, ThinkEvent=%s). Reactivating...",
+						player:getName(), guid, tostring(BotActive and BotActive[guid]), tostring(botThinkEvents and botThinkEvents[guid] ~= nil)))
+					pcall(BotSystem.activateBot, player)
+				end
+			end
+		end
+
+		-- 2. Population Auto-Heal: Ensure target online count is maintained
+		local target = BOT_CONFIG.TARGET_ONLINE
+		local cfgRes = db.storeQuery("SELECT `config_value` FROM `bot_startup_config` WHERE `config_key` = 'debug_active_count'")
+		if cfgRes then
+			local dVal = tonumber(Result.getString(cfgRes, "config_value"))
+			Result.free(cfgRes)
+			if dVal and dVal > 0 then target = dVal end
+		end
+
+		if onlineCount < target then
+			local q = string.format("SELECT `id`, `name` FROM `players` WHERE (`account_id` = %d OR `name` LIKE 'Bot %s') AND `deletion` = 0 ORDER BY `level` DESC, `experience` DESC LIMIT %d",
+				BOT_CONFIG.BOT_ACCOUNT_ID, "%", target)
+			local qRes = db.storeQuery(q)
+			if qRes then
+				repeat
+					local qGuid = Result.getNumber(qRes, "id")
+					local bName = Result.getString(qRes, "name")
+					if not (BotOfflineTraining and BotOfflineTraining[qGuid]) then
+						local p = Player(bName)
+						if not p or p:isRemoved() then
+							local newP = Game.loadBotPlayer(bName)
+							if newP then
+								local guid = newP:getGuid()
+								BotPlayers[guid] = newP
+								newP:registerEvent("BotDeath")
+								pcall(BotSystem.activateBot, newP)
+								db.botAsyncQuery("INSERT IGNORE INTO `players_online` (`player_id`) VALUES (" .. guid .. ")")
+								logger.info("[BotWatchdog] Auto-healed population deficit: loaded and activated " .. bName)
+								onlineCount = onlineCount + 1
+								if onlineCount >= target then
+									break
+								end
+							end
+						end
+					end
+				until not Result.next(qRes)
+				Result.free(qRes)
+			end
+		end
+	end
+
 	-- Global command queue poll (so MySQL-based commands still work).
 	-- JITTER FIX 2026-06-10: async — the sync db.storeQuery blocked the dispatcher
 	-- for the full round-trip incl. databaseLock convoy behind worker-thread DB
@@ -317,18 +332,36 @@ function botManager.onThink(interval)
 		"SELECT `id`, `bot_name`, `command` FROM `bot_commands` WHERE `processed` = 0 ORDER BY `id` ASC LIMIT 10",
 		function(cmdResult)
 	if cmdResult then
+		local rows = {}
 		repeat
-			local cmdId = Result.getNumber(cmdResult, "id")
-			local botName = Result.getString(cmdResult, "bot_name")
-			local cmd = Result.getString(cmdResult, "command")
+			table.insert(rows, {
+				id = Result.getNumber(cmdResult, "id"),
+				bot_name = Result.getString(cmdResult, "bot_name"),
+				command = Result.getString(cmdResult, "command")
+			})
+		until not Result.next(cmdResult)
+		Result.free(cmdResult)
 
-			local resultText
-			-- Global reload: parse `reload [debug,N | debug off]`
-			-- _global / reload              → plain hot-reload, preserve current active set
-			-- _global / reload debug,1      → hot-reload + activate 1 bot with debug stream
-			-- _global / reload debug off    → hot-reload + activate all bots, clear debug
+		-- Detect multiple set_population commands in the same batch and only execute the last one
+		local lastPopIdx = nil
+		for idx, r in ipairs(rows) do
+			local low = r.command:lower()
+			if r.bot_name == "_global" and (low:match("^set_population%s+") or low:match("^population%s+") or low:match("^scale%s+")) then
+				lastPopIdx = idx
+			end
+		end
+
+		for idx, row in ipairs(rows) do
+			local cmdId = row.id
+			local botName = row.bot_name
+			local cmd = row.command
 			local low = cmd:lower()
-			if botName == "_global" and (low == "reload" or low:match("^reload%s")) then
+			local resultText
+
+			-- If there is a newer scale command in this same batch, skip and mark superseded
+			if row.bot_name == "_global" and (low:match("^set_population%s+") or low:match("^population%s+") or low:match("^scale%s+")) and lastPopIdx and idx < lastPopIdx then
+				resultText = "Comando de escala ignorado (substituido por comando mais recente na fila)"
+			elseif botName == "_global" and (low == "reload" or low:match("^reload%s")) then
 				local opts = { source = "queue" }
 				-- Parse from `cmd` (original case), NOT `low` — bot names must survive.
 				local dbgSpec, dbgNames = BotSystem.parseDebugSpec(cmd)
@@ -355,6 +388,78 @@ function botManager.onThink(interval)
 			elseif botName == "_global" and (low == "reload_scripts" or low == "scripts") then
 				local ok, err = pcall(function() Game.reload(RELOAD_TYPE_SCRIPTS) end)
 				resultText = ok and "Scripts reloaded successfully" or ("Reload failed: " .. tostring(err))
+			elseif botName == "_global" and (low == "replenish_market" or low == "market_replenish") then
+				local ok, err = pcall(function()
+					-- Top-up depleted GOD offers
+					db.asyncQuery("UPDATE `market_offers` SET `amount` = 65535, `created` = UNIX_TIMESTAMP() WHERE `player_id` = 7 AND `amount` < 1000")
+					-- Clean GOD inbox/depot
+					db.asyncQuery("DELETE FROM `player_inboxitems` WHERE `player_id` = 7")
+					db.asyncQuery("DELETE FROM `player_depotitems` WHERE `player_id` = 7")
+				end)
+				resultText = ok and "Market replenished successfully" or ("Replenish failed: " .. tostring(err))
+			elseif botName == "_global" and (low == "wake_all" or low == "wake" or low == "wakeall") then
+				local awakened = 0
+				for _, p in ipairs(Game.getPlayers()) do
+					if p:isBotPlayer() and not p:isRemoved() then
+						local guid = p:getGuid()
+						BotPlayers[guid] = p
+						pcall(BotSystem.activateBot, p)
+						awakened = awakened + 1
+					end
+				end
+				resultText = string.format("Woke up %d online bots", awakened)
+			elseif botName == "_global" and low:match("^inspect%s+") then
+				local targetName = cmd:match("^%S+%s+(.+)")
+				if targetName and targetName:lower() == "summary" then
+					local totalOnline = 0
+					local totalActive = 0
+					local totalThink = 0
+					for _, botP in ipairs(Game.getPlayers()) do
+						if botP:isBotPlayer() and not botP:isRemoved() then
+							local guid = botP:getGuid()
+							BotPlayers[guid] = botP
+							totalOnline = totalOnline + 1
+							if BotActive and BotActive[guid] then
+								totalActive = totalActive + 1
+							end
+							if botThinkEvents and botThinkEvents[guid] then
+								totalThink = totalThink + 1
+							end
+						end
+					end
+					resultText = string.format("Bot Summary: %d online | %d active | %d think loops running", totalOnline, totalActive, totalThink)
+				else
+					local p = Player(targetName)
+					if not p and BotPlayers then
+						for guid, botP in pairs(BotPlayers) do
+							if botP and not botP:isRemoved() and botP:getName():lower() == targetName:lower() then
+								p = botP
+								break
+							end
+						end
+					end
+					if p then
+						local guid = p:getGuid()
+						BotPlayers[guid] = p
+						local s = BotState and BotState[p:getGuid()]
+						local pos = p:getPosition()
+						if s then
+							resultText = string.format("Bot: %s (GUID:%d) | State: %s | Phase: %s | Cmd: %s | FC: %s | Pos: %d,%d,%d | StuckStart: %s | WalkHistLen: %d | IdleStart: %s | Active: %s",
+								p:getName(), p:getGuid(), tostring(s.state), tostring(s.huntPhase), tostring(s.cavebotCommand), tostring(s.floorChangeState),
+								pos.x, pos.y, pos.z, tostring(s.stuckStartTime), s.walkHistory and #s.walkHistory or 0, tostring(s.idleStartTime), tostring(BotActive and BotActive[p:getGuid()]))
+						else
+							resultText = string.format("Bot: %s (GUID:%d) online at %d,%d,%d but has NO BotState table!", p:getName(), p:getGuid(), pos.x, pos.y, pos.z)
+						end
+					else
+						local allOnline = {}
+						for guid, botP in pairs(BotPlayers or {}) do
+							if botP and not botP:isRemoved() then
+								table.insert(allOnline, botP:getName())
+							end
+						end
+						resultText = string.format("Bot '%s' not found. Total BotPlayers in memory: %d", targetName, #allOnline)
+					end
+				end
 			elseif botName == "_global" and (low:match("^set_exp_multiplier%s+") or low:match("^exp_multiplier%s+")) then
 				local mult = tonumber(cmd:match("[%d%.]+")) or 1.0
 				local ratePct = math.floor(mult * 100)
@@ -366,6 +471,13 @@ function botManager.onThink(interval)
 				logger.info("[BotManager] " .. resultText)
 				pcall(function()
 					Game.broadcastMessage(string.format("[Servidor] Multiplicador de Experiencia alterado para %.2fx!", mult), MESSAGE_EVENT_ADVANCE)
+					-- Atualiza o mostrador visual de XP imediatamente no cliente (OTClient) de todos os jogadores online
+					for _, onlineP in ipairs(Game.getPlayers()) do
+						if onlineP and not onlineP:isRemoved() then
+							local newBaseRate = onlineP:getFinalBaseRateExperience() * 100
+							onlineP:setBaseXpGain(newBaseRate)
+						end
+					end
 				end)
 			elseif low:match("^apply_edit") then
 				local targetPlayer = Player(botName)
@@ -383,8 +495,18 @@ function botManager.onThink(interval)
 					action = action:lower()
 					if action == "connect" or action == "on" then
 						local p = Player(targetName)
-						if p then
-							resultText = targetName .. " is already online"
+						if not p and BotPlayers then
+							for guid, botP in pairs(BotPlayers) do
+								if botP and not botP:isRemoved() and botP:getName():lower() == targetName:lower() then
+									p = botP
+									break
+								end
+							end
+						end
+						if p and not p:isRemoved() then
+							BotPlayers[p:getGuid()] = p
+							local ok, err = pcall(BotSystem.activateBot, p)
+							resultText = string.format("%s online: activateBot ok=%s err=%s", targetName, tostring(ok), tostring(err))
 						else
 							local newP = Game.loadBotPlayer(targetName)
 							if newP then
@@ -434,8 +556,7 @@ function botManager.onThink(interval)
 			db.botAsyncQuery(string.format(
 				"UPDATE `bot_commands` SET `processed` = 1, `result` = %s, `executed_at` = %d WHERE `id` = %d",
 				db.escapeString(resultText:sub(1, BOT_CMD_RESULT_MAX)), os.time(), cmdId))
-		until not Result.next(cmdResult)
-		Result.free(cmdResult)
+		end
 	end
 	end)
 

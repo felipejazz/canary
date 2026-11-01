@@ -361,7 +361,7 @@ end
 
 function Player.getFinalLowLevelBonus(self)
 	local level = self:getLevel()
-	if level > 0 and level <= 50 then
+	if level > 0 and level <= 60 then
 		self:setGrindingXpBoost(configManager.getNumber(configKeys.LOW_LEVEL_BONUS_EXP))
 	else
 		self:setGrindingXpBoost(0)

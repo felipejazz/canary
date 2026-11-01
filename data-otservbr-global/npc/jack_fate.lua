@@ -75,7 +75,7 @@ local function addTravelKeyword(keyword, cost, destination, text, condition)
 	travelKeyword:addChildKeyword({ "no" }, StdModule.say, { npcHandler = npcHandler, text = "We would like to serve you some time.", reset = true })
 end
 
-addTravelKeyword("edron", 170, Position(33173, 31764, 6))
+addTravelKeyword("edron", 170, Position(33175, 31764, 6))
 addTravelKeyword("venore", 180, Position(32954, 32022, 6))
 addTravelKeyword("port hope", 50, Position(32527, 32784, 6))
 addTravelKeyword("darashia", 200, Position(33289, 32480, 6))

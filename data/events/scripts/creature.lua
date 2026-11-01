@@ -21,7 +21,9 @@ function Creature:onTargetCombat(target)
 
 	if not IsExpertPVP() and (not IsRetroPVP() or ADVANCED_SECURE_MODE ~= 0) then
 		if self:isPlayer() and target:isPlayer() then
-			if self:hasSecureMode() then
+			-- Bots in PK mode / combat are autonomous and do not use the human client secure-mode toggle
+			local isBot = self.isBotPlayer and self:isBotPlayer()
+			if not isBot and self:hasSecureMode() then
 				return RETURNVALUE_YOUMAYNOTATTACKTHISPLAYER
 			end
 		end
@@ -55,6 +57,17 @@ function Creature:onDrainHealth(attacker, typePrimary, damagePrimary, typeSecond
 
 	if not attacker then
 		return typePrimary, damagePrimary, typeSecondary, damageSecondary, colorPrimary, colorSecondary
+	end
+
+	-- Reação de auto-defesa de bot agredido por outro player
+	if self:isPlayer() and attacker:isPlayer() and self:getId() ~= attacker:getId() then
+		local isBot = self.isBotPlayer and self:isBotPlayer()
+		if isBot and BotSystem and BotSystem.onBotDamagedByPlayer then
+			local totalDmg = (damagePrimary or 0) + (damageSecondary or 0)
+			if totalDmg > 0 then
+				BotSystem.onBotDamagedByPlayer(self, attacker, totalDmg)
+			end
+		end
 	end
 
 	return typePrimary, damagePrimary, typeSecondary, damageSecondary, colorPrimary, colorSecondary

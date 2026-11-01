@@ -220,6 +220,13 @@ if Modules == nil then
 
 		local playerPosition = player:getPosition()
 
+		local hasExhaustion = player:kv():get("npc-exhaustion") or 0
+		if hasExhaustion > os.time() and hasExhaustion <= (os.time() + 10) then
+			npcHandler:say("Sorry, but you need to wait three seconds before travel again.", npc, player)
+			playerPosition:sendMagicEffect(CONST_ME_POFF)
+			return false
+		end
+
 		if parameters.premium and not player:isPremium() then
 			npcHandler:say("I'm sorry, but you need a premium account in order to travel onboard our ships.", npc, player)
 		elseif parameters.level and player:getLevel() < parameters.level then
@@ -229,23 +236,18 @@ if Modules == nil then
 		elseif not player:removeMoneyBank(cost) then
 			npcHandler:say("You don't have enough money.", npc, player)
 		else
-			local hasExhaustion = player:kv():get("npc-exhaustion") or 0
-			if hasExhaustion > os.time() then
-				npcHandler:say("Sorry, but you need to wait three seconds before travel again.", player)
-				playerPosition:sendMagicEffect(CONST_ME_POFF)
-			else
-				npcHandler:removeInteraction(npc, player)
-				npcHandler:say(parameters.text or "Set the sails!", npc, player)
+			npcHandler:removeInteraction(npc, player)
+			npcHandler:say(parameters.text or "Set the sails!", npc, player)
 
-				local destination = parameters.destination
-				if type(destination) == "function" then
-					destination = destination(player)
-				end
+			local destination = parameters.destination
+			if type(destination) == "function" then
+				destination = destination(player)
+			end
 
-				player:kv():set("npc-exhaustion", os.time() + 3) -- 3 seconds
-				player:teleportTo(destination)
-				playerPosition:sendMagicEffect(CONST_ME_TELEPORT)
-				player:addAchievementProgress("Ship's Kobold", 1250)
+			player:kv():set("npc-exhaustion", os.time() + 3) -- 3 seconds
+			player:teleportTo(destination)
+			playerPosition:sendMagicEffect(CONST_ME_TELEPORT)
+			player:addAchievementProgress("Ship's Kobold", 1250)
 
 				-- What a foolish Quest - Mission 3
 				if Storage.Quest.U8_1.WhatAFoolishQuest.PieBoxTimer ~= nil then
@@ -256,7 +258,6 @@ if Modules == nil then
 					end
 				end
 			end
-		end
 
 		npcHandler:resetNpc(npc, player)
 		return true

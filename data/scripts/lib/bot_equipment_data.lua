@@ -105,7 +105,7 @@ function BotEquipmentData.getOptionForSlot(bracket, vocStr, slot, personality)
 	return opts[1]
 end
 
-function BotEquipmentData.getLoadout(level, baseVoc, personality)
+function BotEquipmentData.getLoadout(level, baseVoc, personality, player)
 	local bracket = BotEquipmentData.getBracketForLevel(level)
 	local vocStr = VOC_NAME_BY_ID[baseVoc or 4] or "knight"
 	personality = personality or 2
@@ -117,6 +117,36 @@ function BotEquipmentData.getLoadout(level, baseVoc, personality)
 	local rightOpt = BotEquipmentData.getOptionForSlot(bracket, vocStr, "right", personality)
 	local leftOpt  = BotEquipmentData.getOptionForSlot(bracket, vocStr, "left", personality)
 	local ammoOpt  = 0
+
+	-- Knight Weapon Selection: strictly match character's highest trained skill
+	if baseVoc == 4 and player then
+		local sw = player.getSkillLevel and player:getSkillLevel(SKILL_SWORD) or 10
+		local ax = player.getSkillLevel and player:getSkillLevel(SKILL_AXE) or 10
+		local cl = player.getSkillLevel and player:getSkillLevel(SKILL_CLUB) or 10
+
+		if sw >= ax and sw >= cl then
+			-- Sword
+			if bracket >= 100 then rightOpt = { item_id = 7390 } -- The Justice Seeker
+			elseif bracket >= 50 then rightOpt = { item_id = 7383 } -- Relic Sword
+			elseif bracket >= 20 then rightOpt = { item_id = 7385 } -- Crimson Sword
+			else rightOpt = { item_id = 7774 } -- Jagged Sword
+			end
+		elseif ax >= sw and ax >= cl then
+			-- Axe
+			if bracket >= 100 then rightOpt = { item_id = 7434 } -- Royal Axe
+			elseif bracket >= 50 then rightOpt = { item_id = 7389 } -- Heroic Axe
+			elseif bracket >= 20 then rightOpt = { item_id = 7380 } -- Headchopper
+			else rightOpt = { item_id = 7773 } -- Steel Axe
+			end
+		else
+			-- Club
+			if bracket >= 100 then rightOpt = { item_id = 7429 } -- Blessed Sceptre
+			elseif bracket >= 50 then rightOpt = { item_id = 7415 } -- Cranial Basher
+			elseif bracket >= 20 then rightOpt = { item_id = 7386 } -- Shadow Sceptre
+			else rightOpt = { item_id = 3327 } -- Daramian Mace
+			end
+		end
+	end
 
 	-- Paladin Archetype Kits
 	if baseVoc == 3 then

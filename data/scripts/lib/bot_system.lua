@@ -5,6 +5,11 @@
 -- ============================================================================
 
 BotSystem = BotSystem or {}
+BotSystem.refillDecisionCache = BotSystem.refillDecisionCache or {}
+
+if not BotPolitics then
+	pcall(function() dofile("data/scripts/lib/bot_politics_system.lua") end)
+end
 
 if db and not db.botAsyncStoreQuery then
 	db.botAsyncStoreQuery = db.asyncStoreQuery or function(q, cb) local res = db.storeQuery(q); if cb then cb(res) end end
@@ -152,15 +157,21 @@ local function implSetSlotItem(self, slot, itemId, count)
 	if cur then
 		pcall(function() cur:remove() end)
 	end
-	local item = Game.createItem(itemId, count or 1)
-	if not item then return false end
-	-- 1. Try moving directly into the requested slot
-	local ok, ret = pcall(function() return item:moveToSlot(self, slot) end)
-	if ok and ret then
-		return true
+	-- If free capacity is low, purge trash/irrelevant items so addItem can succeed
+	if self.getFreeCapacity and self:getFreeCapacity() < 3000 and BotSystem and BotSystem.dropIrrelevantItems then
+		pcall(function() BotSystem.dropIrrelevantItems(self) end)
 	end
-	-- 2. Fallback to self:addItem with slot parameter without dropping on map
-	pcall(function() item:remove() end)
+
+	local item = Game.createItem(itemId, count or 1)
+	if item then
+		local ok, ret = pcall(function() return item:moveToSlot(self, slot) end)
+		if ok and ret then
+			return true
+		end
+		pcall(function() item:remove() end)
+	end
+
+	-- Fallback to self:addItem with slot parameter without dropping on map
 	local fallbackItem = nil
 	local ok2 = pcall(function() fallbackItem = self:addItem(itemId, count or 1, false, 1, slot) end)
 	if ok2 and fallbackItem then
@@ -351,7 +362,7 @@ BOT_CONFIG = {
 	TRAVEL_PAUSE_MAX = 12,
 	PK_CHANCE_PER_TICK = 400,        -- 1/N per tick (~0.25%) to PK a real player
 	PK_BOT_CHANCE_PER_TICK = 4000,   -- 1/N per tick (~0.025%) to PK another bot
-	PK_TIMEOUT = 15,                 -- seconds before PK bot gives up
+	PK_TIMEOUT = 60,                 -- seconds before PK bot gives up
 	COMBAT_TIMEOUT = 30,             -- seconds before combat/flee state resets
 	COMBAT_LEASH_DIST = 15,         -- max distance to chase attacker before giving up
 	FLEE_DISTANCE = 15,              -- tiles to run when fleeing
@@ -430,9 +441,14 @@ FLOOR_CHANGE_STATE = {
 -- Spell tables: per vocation, level-gated, with cooldowns
 -- ============================================================================
 
+if not BOT_TIBIADATA_SPELLS then
+	pcall(function() dofile("data/scripts/lib/bot_spell_table.lua") end)
+end
+
 BOT_SPELLS = {
 	[1] = { -- Sorcerer (base voc 1)
 		-- Strikes (Single-target)
+		{level = 8,   name = "exori min flam",     combatType = COMBAT_FIREDAMAGE,   range = 3, effect = CONST_ME_FIREATTACK,   cd = 2, baseDmg = 15},
 		{level = 12,  name = "exori vis",          combatType = COMBAT_ENERGYDAMAGE, range = 3, effect = CONST_ME_ENERGYHIT,    cd = 2, baseDmg = 20},
 		{level = 14,  name = "exori flam",         combatType = COMBAT_FIREDAMAGE,   range = 3, effect = CONST_ME_FIREATTACK,   cd = 2, baseDmg = 22},
 		{level = 16,  name = "exori mort",         combatType = COMBAT_DEATHDAMAGE,  range = 3, effect = CONST_ME_MORTAREA,     cd = 2, baseDmg = 26},
@@ -448,6 +464,7 @@ BOT_SPELLS = {
 	},
 	[2] = { -- Druid (base voc 2)
 		-- Strikes (Single-target)
+		{level = 8,   name = "exori min flam",     combatType = COMBAT_FIREDAMAGE,   range = 3, effect = CONST_ME_FIREATTACK,   cd = 2, baseDmg = 15},
 		{level = 13,  name = "exori tera",         combatType = COMBAT_EARTHDAMAGE,  range = 3, effect = CONST_ME_CARNIPHILA,   cd = 2, baseDmg = 20},
 		{level = 14,  name = "exori flam",         combatType = COMBAT_FIREDAMAGE,   range = 3, effect = CONST_ME_FIREATTACK,   cd = 2, baseDmg = 22},
 		{level = 15,  name = "exori frigo",        combatType = COMBAT_ICEDAMAGE,    range = 3, effect = CONST_ME_ICEATTACK,    cd = 2, baseDmg = 24},
@@ -462,7 +479,7 @@ BOT_SPELLS = {
 	},
 	[3] = { -- Paladin (base voc 3)
 		-- Strikes (Single-target)
-		{level = 23,  name = "exori con",          combatType = COMBAT_PHYSICALDAMAGE,range = 5, cd = 2, baseDmg = 25, projectile = CONST_ANI_ROYALSPEAR},
+		{level = 8,   name = "exori con",          combatType = COMBAT_PHYSICALDAMAGE,range = 5, cd = 2, baseDmg = 25, projectile = CONST_ANI_ROYALSPEAR},
 		{level = 40,  name = "exori san",          combatType = COMBAT_HOLYDAMAGE,   range = 5, effect = CONST_ME_HOLYDAMAGE,   cd = 2, baseDmg = 35, projectile = CONST_ANI_ROYALSPEAR},
 		{level = 90,  name = "exori gran con",     combatType = COMBAT_PHYSICALDAMAGE,range = 5, cd = 6, baseDmg = 55, projectile = CONST_ANI_ROYALSPEAR},
 		-- AoE (2+ targets)
@@ -470,14 +487,15 @@ BOT_SPELLS = {
 	},
 	[4] = { -- Knight (base voc 4)
 		-- Strikes (Single-target)
-		{level = 16,  name = "exori ico",          combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 2, baseDmg = 20},
+		{level = 1,   name = "exori infir min",    combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 6, baseDmg = 12, isAoE = true},
+		{level = 8,   name = "exori ico",          combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 2, baseDmg = 20},
 		{level = 28,  name = "exori hur",          combatType = COMBAT_PHYSICALDAMAGE, range = 4, effect = CONST_ME_HITAREA,    cd = 4, baseDmg = 30},
+		{level = 110, name = "exori gran ico",     combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 8, baseDmg = 90},
 		-- AoE (2+ targets)
 		{level = 33,  name = "exori mas",          combatType = COMBAT_PHYSICALDAMAGE, range = 0, effect = CONST_ME_HITAREA,    cd = 8, baseDmg = 35, isAoE = true},
 		{level = 35,  name = "exori",              combatType = COMBAT_PHYSICALDAMAGE, range = 0, effect = CONST_ME_HITAREA,    cd = 4, baseDmg = 45, isAoE = true},
 		{level = 70,  name = "exori min",          combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 6, baseDmg = 55, isAoE = true},
 		{level = 90,  name = "exori gran",         combatType = COMBAT_PHYSICALDAMAGE, range = 0, effect = CONST_ME_HITAREA,    cd = 6, baseDmg = 75, isAoE = true},
-		{level = 110, name = "exori gran ico",     combatType = COMBAT_PHYSICALDAMAGE, range = 1, effect = CONST_ME_HITAREA,    cd = 8, baseDmg = 90, isAoE = true},
 	},
 }
 
@@ -499,6 +517,7 @@ BOT_HEAL_SPELLS = {
 		{level = 60, name = "exura gran san",heal = 600,cd = 1, minHpPercent = 0.45},
 	},
 	[4] = { -- Knight
+		{level = 1,   name = "exura infir ico",heal = 60,   cd = 1, minHpPercent = 0.85},
 		{level = 8,   name = "exura ico",     heal = 150,  cd = 1, minHpPercent = 0.80},
 		{level = 300, name = "exura med ico", heal = 450,  cd = 1, minHpPercent = 0.50},
 	},
@@ -693,7 +712,7 @@ BOAT_POSITIONS = {
 	[8]  = Position(32387, 31822, 6),   -- Thais (Captain Greyhound)
 	[9]  = Position(32954, 32022, 6),   -- Venore (Captain Fearless)
 	[10] = Position(33092, 32883, 6),   -- Ankrahmun (Captain Sinbeard)
-	[11] = Position(33173, 31764, 6),   -- Edron (Captain Gulliver)
+	[11] = Position(33175, 31764, 6),   -- Edron (Captain Gulliver)
 	[12] = Position(32097, 31964, 6),   -- Farmine (Captain Kurt) [steamship]
 	[13] = Position(33289, 32480, 6),   -- Darashia (Captain Fearless)
 	[14] = Position(32285, 32892, 6),   -- Liberty Bay (Captain Bluebear)
@@ -915,15 +934,28 @@ NPC_TRAVEL_ROUTES = {
 	{ npc_name = "Carlson", from_city = "Vega", npc_x = 32022, npc_y = 31692, npc_z = 7, dest_keyword = "tibia", to_destination = "Carlin Ferry", cost_gp = 0, dest_x = 32235, dest_y = 31674, dest_z = 7 },
 	{ npc_name = "Anderson", from_city = "Senja", npc_x = 32127, npc_y = 31660, npc_z = 7, dest_keyword = "tibia", to_destination = "Carlin Ferry", cost_gp = 0, dest_x = 32235, dest_y = 31674, dest_z = 7 },
 	-- Local Ferries & Islands
+	{ npc_name = "Captain Seahorse", from_city = "Edron", npc_x = 33175, npc_y = 31763, npc_z = 6, dest_keyword = "cormaya", to_destination = "Cormaya", cost_gp = 20, dest_x = 33288, dest_y = 31956, dest_z = 6 },
 	{ npc_name = "Pemaret", from_city = "Cormaya", npc_x = 33286, npc_y = 31955, npc_z = 6, dest_keyword = "edron", to_destination = "Edron", cost_gp = 20, dest_x = 33176, dest_y = 31764, dest_z = 6 },
+	{ npc_name = "Pemaret", from_city = "Cormaya", npc_x = 33286, npc_y = 31955, npc_z = 6, dest_keyword = "eremo", to_destination = "Eremo's Island", cost_gp = 0, dest_x = 33314, dest_y = 31883, dest_z = 7 },
+	{ npc_name = "Eremo", from_city = "Eremo's Island", npc_x = 33314, npc_y = 31883, npc_z = 7, dest_keyword = "cormaya", to_destination = "Cormaya", cost_gp = 0, dest_x = 33288, dest_y = 31956, dest_z = 6 },
 	{ npc_name = "Captain Waverider", from_city = "Liberty Bay", npc_x = 32346, npc_y = 32859, npc_z = 7, dest_keyword = "peg leg", to_destination = "Meriana", cost_gp = 50, dest_x = 32346, dest_y = 32625, dest_z = 7 },
+	{ npc_name = "Captain Waverider", from_city = "Liberty Bay", npc_x = 32346, npc_y = 32859, npc_z = 7, dest_keyword = "passage", to_destination = "Treasure Island", cost_gp = 200, dest_x = 32131, dest_y = 32913, dest_z = 7 },
+	{ npc_name = "Captain Waverider (Island)", from_city = "Treasure Island", npc_x = 32131, npc_y = 32914, npc_z = 7, dest_keyword = "liberty bay", to_destination = "Liberty Bay", cost_gp = 0, dest_x = 32285, dest_y = 32892, dest_z = 6 },
 	{ npc_name = "Sebastian", from_city = "Meriana", npc_x = 32349, npc_y = 32624, npc_z = 7, dest_keyword = "liberty bay", to_destination = "Liberty Bay", cost_gp = 50, dest_x = 32316, dest_y = 32702, dest_z = 7 },
 	{ npc_name = "Sebastian", from_city = "Meriana", npc_x = 32349, npc_y = 32624, npc_z = 7, dest_keyword = "nargor", to_destination = "Nargor", cost_gp = 50, dest_x = 32025, dest_y = 32812, dest_z = 7 },
 	{ npc_name = "Sebastian", from_city = "Nargor", npc_x = 32027, npc_y = 32814, npc_z = 7, dest_keyword = "meriana", to_destination = "Meriana", cost_gp = 50, dest_x = 32348, dest_y = 32625, dest_z = 7 },
+	{ npc_name = "Scrutinon", from_city = "Gray Island", npc_x = 33189, npc_y = 31982, npc_z = 7, dest_keyword = "edron", to_destination = "Edron", cost_gp = 190, dest_x = 33175, dest_y = 31764, dest_z = 6 },
+	{ npc_name = "Scrutinon", from_city = "Gray Island", npc_x = 33189, npc_y = 31982, npc_z = 7, dest_keyword = "venore", to_destination = "Venore", cost_gp = 150, dest_x = 32954, dest_y = 32022, dest_z = 6 },
+	{ npc_name = "Scrutinon", from_city = "Gray Island", npc_x = 33189, npc_y = 31982, npc_z = 7, dest_keyword = "ab'dendriel", to_destination = "Ab'Dendriel", cost_gp = 150, dest_x = 32734, dest_y = 31668, dest_z = 6 },
+	{ npc_name = "Scrutinon", from_city = "Gray Island", npc_x = 33189, npc_y = 31982, npc_z = 7, dest_keyword = "darashia", to_destination = "Darashia", cost_gp = 160, dest_x = 33289, dest_y = 32480, dest_z = 6 },
 	{ npc_name = "Buddel", from_city = "Svargrond", npc_x = 32255, npc_y = 31195, npc_z = 7, dest_keyword = "okolnir", to_destination = "Okolnir", cost_gp = 50, dest_x = 32225, dest_y = 31381, dest_z = 7 },
 	{ npc_name = "Buddel", from_city = "Svargrond", npc_x = 32255, npc_y = 31195, npc_z = 7, dest_keyword = "helheim", to_destination = "Helheim", cost_gp = 50, dest_x = 32462, dest_y = 31174, dest_z = 7 },
 	{ npc_name = "Buddel", from_city = "Svargrond", npc_x = 32255, npc_y = 31195, npc_z = 7, dest_keyword = "tyrsung", to_destination = "Tyrsung", cost_gp = 50, dest_x = 32333, dest_y = 31227, dest_z = 7 },
 	{ npc_name = "Buddel", from_city = "Svargrond", npc_x = 32255, npc_y = 31195, npc_z = 7, dest_keyword = "camp", to_destination = "Raider Camp", cost_gp = 50, dest_x = 32021, dest_y = 31294, dest_z = 7 },
+	{ npc_name = "Buddel", from_city = "Okolnir", npc_x = 32225, npc_y = 31382, npc_z = 7, dest_keyword = "svargrond", to_destination = "Svargrond", cost_gp = 50, dest_x = 32255, dest_y = 31197, dest_z = 7 },
+	{ npc_name = "Buddel", from_city = "Helheim", npc_x = 32463, npc_y = 31173, npc_z = 7, dest_keyword = "svargrond", to_destination = "Svargrond", cost_gp = 50, dest_x = 32255, dest_y = 31197, dest_z = 7 },
+	{ npc_name = "Buddel", from_city = "Tyrsung", npc_x = 32333, npc_y = 31228, npc_z = 7, dest_keyword = "svargrond", to_destination = "Svargrond", cost_gp = 50, dest_x = 32255, dest_y = 31197, dest_z = 7 },
+	{ npc_name = "Buddel", from_city = "Raider Camp", npc_x = 32021, npc_y = 31295, npc_z = 7, dest_keyword = "svargrond", to_destination = "Svargrond", cost_gp = 50, dest_x = 32255, dest_y = 31197, dest_z = 7 },
 	{ npc_name = "Lorek", from_city = "Port Hope", npc_x = 32679, npc_y = 32775, npc_z = 7, dest_keyword = "west", to_destination = "Port Hope West", cost_gp = 7, dest_x = 32558, dest_y = 32780, dest_z = 7 },
 	{ npc_name = "Lorek", from_city = "Port Hope", npc_x = 32679, npc_y = 32775, npc_z = 7, dest_keyword = "centre", to_destination = "Port Hope Centre", cost_gp = 7, dest_x = 32628, dest_y = 32771, dest_z = 7 },
 	{ npc_name = "Lorek", from_city = "Port Hope", npc_x = 32679, npc_y = 32775, npc_z = 7, dest_keyword = "darama", to_destination = "Darama Mountain", cost_gp = 30, dest_x = 32987, dest_y = 32729, dest_z = 7 },
@@ -939,6 +971,7 @@ NPC_TRAVEL_ROUTES = {
 	{ npc_name = "Harlow", from_city = "Vengoth", npc_x = 32856, npc_y = 31549, npc_z = 7, dest_keyword = "yalahar", to_destination = "Yalahar", cost_gp = 0, dest_x = 32837, dest_y = 31366, dest_z = 7 },
 	{ npc_name = "Tarak", from_city = "Yalahar", npc_x = 32917, npc_y = 31198, npc_z = 7, dest_keyword = "passage", to_destination = "Yalahar Sunken", cost_gp = 50, dest_x = 32940, dest_y = 31182, dest_z = 7 },
 	{ npc_name = "Tarak", from_city = "Yalahar Sunken", npc_x = 32941, npc_y = 31181, npc_z = 7, dest_keyword = "passage", to_destination = "Yalahar Inner", cost_gp = 0, dest_x = 32916, dest_y = 31199, dest_z = 7 },
+	{ npc_name = "Tarak", from_city = "Yalahar Inner", npc_x = 32917, npc_y = 31198, npc_z = 7, dest_keyword = "passage", to_destination = "Yalahar Sunken", cost_gp = 50, dest_x = 32940, dest_y = 31182, dest_z = 7 },
 	{ npc_name = "Captain Haba", from_city = "Svargrond", npc_x = 32353, npc_y = 31124, npc_z = 6, dest_keyword = "hunt", to_destination = "Sea Serpent Area", cost_gp = 0, dest_x = 31942, dest_y = 31047, dest_z = 6 },
 	{ npc_name = "Captain Haba", from_city = "Sea Serpent Area", npc_x = 31950, npc_y = 31045, npc_z = 6, dest_keyword = "svargrond", to_destination = "Svargrond", cost_gp = 0, dest_x = 32342, dest_y = 31123, dest_z = 6 },
 	{ npc_name = "The Blind Prophet", from_city = "Banuta", npc_x = 33021, npc_y = 32604, npc_z = 7, dest_keyword = "transport", to_destination = "Forbidden Lands", cost_gp = 0, dest_x = 33025, dest_y = 32580, dest_z = 6 },
@@ -952,6 +985,7 @@ NPC_TRAVEL_ROUTES = {
 BotPlayers = BotPlayers or {}    -- {[guid] = playerRef}
 BotState = BotState or {}        -- {[guid] = state_table}
 BotActive = BotActive or {}      -- {[guid] = true/false}
+HuntTesterWorkers = HuntTesterWorkers or {}  -- {[guid] = true} players driven exclusively by the HuntTester; the autonomous brain must leave them alone
 BotOfflineTraining = BotOfflineTraining or {} -- {[guid] = {name, guid, relogPos, info, eventId}}
 botThinkEvents = botThinkEvents or {}         -- {[guid] = eventId}
 CITY_TRAINING_STATUES = CITY_TRAINING_STATUES or {} -- {[townId] = {x, y, z, itemId}}
@@ -965,6 +999,7 @@ QUEST_ACCESS_BY_CODE = QUEST_ACCESS_BY_CODE or {}
 HUNT_MANDATORY_ACCESSES = HUNT_MANDATORY_ACCESSES or {}
 
 BotSystem = BotSystem or {}
+BotSystem.refillDecisionCache = BotSystem.refillDecisionCache or {}
 BotSystem.formatChatText = formatTibiaChatText
 
 -- Load NPC travel routes, Hunt Keys, and Quest Accesses from MariaDB into Lua memory
@@ -1103,20 +1138,65 @@ function BotSystem.recordImpediment(player, huntId, huntName, townName, impType,
 	end)
 end
 
--- Check if player has a key with actionId == keyNumber in their backpack or inventory
+-- Helper to extract actionId from an item reliably across Canary userdata methods and attributes
+local function getSafeItemActionId(it)
+	if not it then return 0 end
+	local aid = 0
+	if it.getActionId then
+		aid = it:getActionId() or 0
+	elseif it.actionid then
+		aid = it.actionid or 0
+	end
+	if aid == 0 and it.getAttribute and ItemAttribute_t and ItemAttribute_t.ACTIONID then
+		aid = it:getAttribute(ItemAttribute_t.ACTIONID) or 0
+	end
+	return tonumber(aid) or 0
+end
+
+-- Check if player has a key with actionId == keyNumber in their backpack, purse/keyring, or equipment
 function BotSystem.playerHasKey(player, keyNumber)
-	if not player or player:isRemoved() or not keyNumber or keyNumber <= 0 then return false, nil end
+	if not player or player:isRemoved() or not keyNumber then return false, nil end
+	local targetKey = tonumber(keyNumber) or 0
+	if targetKey <= 0 then return false, nil end
+
+	-- 1. Check backpack recursively
 	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
 	if bp and bp.getItems then
 		local items = bp:getItems(true)
 		if items then
 			for _, it in ipairs(items) do
-				if it and it.getActionId and it:getActionId() == keyNumber then
+				if getSafeItemActionId(it) == targetKey then
 					return true, it
 				end
 			end
 		end
 	end
+
+	-- 2. Check Purse / Key Ring slot (CONST_SLOT_PURSE) recursively
+	if CONST_SLOT_PURSE then
+		local purse = player:getSlotItem(CONST_SLOT_PURSE)
+		if purse and purse.getItems then
+			local pItems = purse:getItems(true)
+			if pItems then
+				for _, it in ipairs(pItems) do
+					if getSafeItemActionId(it) == targetKey then
+						return true, it
+					end
+				end
+			end
+		end
+	end
+
+	-- 3. Check all equipment slots (hands, ammo, etc.)
+	for slot = CONST_SLOT_HEAD, CONST_SLOT_AMMO do
+		if slot ~= CONST_SLOT_BACKPACK and (not CONST_SLOT_PURSE or slot ~= CONST_SLOT_PURSE) then
+			local it = player:getSlotItem(slot)
+			if it and getSafeItemActionId(it) == targetKey then
+				return true, it
+			end
+		end
+	end
+
 	return false, nil
 end
 
@@ -1128,8 +1208,24 @@ function BotSystem.givePlayerKey(player, keyNumber, itemId)
 
 	local keyItemId = (itemId and itemId > 0) and itemId or 2969
 	local keyItem = player:addItem(keyItemId, 1, false)
-	if keyItem and keyItem.setActionId then
-		keyItem:setActionId(keyNumber)
+
+	-- Fallback if addItem failed due to low free capacity or full primary container
+	if not keyItem then
+		local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+		if bp and bp.addItem then
+			keyItem = bp:addItem(keyItemId, 1)
+		end
+		if not keyItem then
+			keyItem = player:addItem(keyItemId, 1, true)
+		end
+	end
+
+	if keyItem then
+		if keyItem.setActionId then
+			keyItem:setActionId(keyNumber)
+		elseif keyItem.setAttribute and ItemAttribute_t and ItemAttribute_t.ACTIONID then
+			keyItem:setAttribute(ItemAttribute_t.ACTIONID, keyNumber)
+		end
 	end
 	return keyItem
 end
@@ -1750,8 +1846,17 @@ function BotSystem.castDebug(player, state, msg)
 end
 
 function BotSystem.recordPosition(state, pos)
-	state.walkHistoryIdx = (state.walkHistoryIdx % 8) + 1
-	state.walkHistory[state.walkHistoryIdx] = { x = pos.x, y = pos.y, z = pos.z }
+	if not state.walkHistory then
+		state.walkHistory = {}
+		state.walkHistoryIdx = 0
+	end
+	state.walkHistoryIdx = (state.walkHistoryIdx % 16) + 1
+	state.walkHistory[state.walkHistoryIdx] = {
+		x = pos.x,
+		y = pos.y,
+		z = pos.z,
+		t = os.time()
+	}
 end
 
 function BotSystem.isStuck(state)
@@ -1765,6 +1870,309 @@ function BotSystem.isStuck(state)
 		end
 	end
 	return sameCount >= 5
+end
+
+function BotSystem.detectStuckOrErratic(state, currentPos, isMovingState, inCombat)
+	if not state.walkHistory or #state.walkHistory < 6 then return nil end
+
+	local historyLen = #state.walkHistory
+	local now = os.time()
+	local ref = state.walkHistory[state.walkHistoryIdx]
+	if not ref then return nil end
+
+	-- 1. Stationary Stuck: same tile for >= 25s in an active moving state (excluding active combat and deliberate waits)
+	-- Fix 5: Raised from 12s to 25s to avoid false positives during server saves (~14s) and initial pathing
+	if isMovingState and not inCombat then
+		local isDeliberateWait = (state.resupplyUntil and now < state.resupplyUntil)
+			or (state.navDepotWaitUntil and now < state.navDepotWaitUntil)
+			or (state.dwellUntil and now < state.dwellUntil)
+		-- Fix 5: Also exclude the first 30s of TRAVEL_TO (bot is calculating the path)
+		local isEarlyTravel = (state.huntPhase == HUNT_PHASE.TRAVEL_TO
+			and state.huntStartTime and (now - state.huntStartTime) < 30)
+		if not isDeliberateWait and not isEarlyTravel then
+			local stationaryStreak = true
+			local oldestTime = ref.t or now
+			for _, p in ipairs(state.walkHistory) do
+				if p.x ~= currentPos.x or p.y ~= currentPos.y or p.z ~= currentPos.z then
+					stationaryStreak = false
+					break
+				else
+					if p.t and p.t < oldestTime then oldestTime = p.t end
+				end
+			end
+			if stationaryStreak and (now - oldestTime) >= 25 then
+				return "stationary"
+			end
+		end
+	end
+
+	-- 1b. Idle Stagnant: stationary on same tile for >= 30s in BOT_STATE.IDLE
+	if state.state == BOT_STATE.IDLE then
+		local stationaryStreak = true
+		local oldestTime = ref.t or now
+		for _, p in ipairs(state.walkHistory) do
+			if p.x ~= currentPos.x or p.y ~= currentPos.y or p.z ~= currentPos.z then
+				stationaryStreak = false
+				break
+			else
+				if p.t and p.t < oldestTime then oldestTime = p.t end
+			end
+		end
+		if stationaryStreak and (now - oldestTime) >= 30 then
+			return "idle_stagnant"
+		end
+	end
+
+	-- 1c. Dwelling Expired: bot in DWELLING state for > 30s past dwellUntil
+	if state.state == BOT_STATE.DWELLING and state.dwellUntil and now > (state.dwellUntil + 30) then
+		return "dwelling_expired"
+	end
+
+	-- Collect ordered list of recent positions (up to 12)
+	local recent = {}
+	local idx = state.walkHistoryIdx
+	for i = 0, math.min(11, historyLen - 1) do
+		local posIdx = ((idx - 1 - i + 16) % 16) + 1
+		local entry = state.walkHistory[posIdx]
+		if entry then
+			table.insert(recent, entry)
+		end
+	end
+	if #recent < 6 then return nil end
+
+	-- Count distinct position changes
+	local stepCount = 0
+	for i = 1, #recent - 1 do
+		if recent[i].x ~= recent[i + 1].x or recent[i].y ~= recent[i + 1].y or recent[i].z ~= recent[i + 1].z then
+			stepCount = stepCount + 1
+		end
+	end
+
+	-- 2. Micro-Oscillation (Ping-Pong / Erratic Twitching in <= 1 SQM bounding box)
+	if stepCount >= 4 then
+		local minX, maxX = recent[1].x, recent[1].x
+		local minY, maxY = recent[1].y, recent[1].y
+		local sameZ = true
+		for _, p in ipairs(recent) do
+			if p.z ~= currentPos.z then sameZ = false break end
+			if p.x < minX then minX = p.x end
+			if p.x > maxX then maxX = p.x end
+			if p.y < minY then minY = p.y end
+			if p.y > maxY then maxY = p.y end
+		end
+		if sameZ and (maxX - minX) <= 1 and (maxY - minY) <= 1 then
+			return "micro_oscillation"
+		end
+	end
+
+	-- 3. Cyclic Loop (Macro-Loop around pillars/tables/rooms):
+	-- Net displacement <= 2 SQMs despite taking >= 8 steps across <= 5 unique tiles
+	if stepCount >= 8 and #recent >= 10 then
+		local oldest = recent[#recent]
+		if oldest and oldest.z == currentPos.z then
+			local dispX = math.abs(currentPos.x - oldest.x)
+			local dispY = math.abs(currentPos.y - oldest.y)
+			local netDisplacement = math.max(dispX, dispY)
+
+			local uniqueTiles = {}
+			local uniqueCount = 0
+			for _, p in ipairs(recent) do
+				local k = p.x .. ":" .. p.y
+				if not uniqueTiles[k] then
+					uniqueTiles[k] = true
+					uniqueCount = uniqueCount + 1
+				end
+			end
+
+			if netDisplacement <= 2 and uniqueCount <= 5 then
+				return "cyclic_loop"
+			end
+		end
+	end
+
+	return nil
+end
+
+function BotSystem.resolveStuck(player, state, currentPos, stuckType, inPz)
+	state.stuckStartTime = state.stuckStartTime or os.time()
+	local elapsed = os.time() - state.stuckStartTime
+
+	logger.warn(string.format("[BotStuck] Bot %s stuck detected (type=%s, elapsed=%ds, pos=%d,%d,%d, inPz=%s)",
+		player:getName(), stuckType, elapsed, currentPos.x, currentPos.y, currentPos.z, tostring(inPz)))
+
+	-- Immediate Z-level mismatch fix (e.g. stranded on boat deck/dock or wrong floor outside hunt)
+	local expectedZ = BotSystem.getExpectedZ(player)
+	if currentPos.z ~= expectedZ and state.state ~= BOT_STATE.HUNTING and state.state ~= BOT_STATE.TRAINING then
+		local spawnPos = BotSystem.getSpawnPosition(player)
+		logger.warn(string.format("[BotStuck] Bot %s Z-mismatch at z=%d (expected z=%d) — relocating to spawn position (%d,%d,%d)",
+			player:getName(), currentPos.z, expectedZ, spawnPos.x, spawnPos.y, spawnPos.z))
+		player:stopWalk()
+		player:teleportTo(spawnPos)
+		state.walkTarget = nil
+		state.currentPOI = nil
+		state.pathFailCount = 0
+		state.stuckStartTime = nil
+		state.walkHistory = {}
+		state.walkHistoryIdx = 0
+		if inPz then
+			BotSystem.clearCombat(state, player)
+		end
+		return
+	end
+
+	-- Fast recovery for hunt stuck in protection zone: abort hunt back to IDLE
+	-- ONLY abort for PATROLLING phase (if bot died or got teleported into PZ during cave patrol)
+	if inPz and state.state == BOT_STATE.HUNTING and state.huntPhase == HUNT_PHASE.PATROLLING then
+		logger.warn(string.format("[BotStuck] Bot %s stuck in PZ (%d,%d,%d) during hunt patrol — aborting hunt back to IDLE",
+			player:getName(), currentPos.x, currentPos.y, currentPos.z))
+		BotSystem.abortHunt(player, state, "stuck in PZ")
+		state.stuckStartTime = nil
+		state.walkHistory = {}
+		state.walkHistoryIdx = 0
+		return
+	end
+
+	-- Fast recovery for dwelling expiration
+	if stuckType == "dwelling_expired" then
+		state.state = BOT_STATE.IDLE
+		state.walkTarget = nil
+		state.currentPOI = nil
+		state.idleDepotTarget = nil
+		state.stuckStartTime = nil
+		return
+	end
+
+	-- Fast recovery for stagnant idle: pick a new POI
+	if stuckType == "idle_stagnant" then
+		state.walkTarget = nil
+		state.currentPOI = nil
+		state.pathFailCount = 0
+		state.consecutivePOIFails = 0
+		state.stuckStartTime = nil
+		local nextPoi = BotSystem.pickNextPOI(player, state)
+		if nextPoi then
+			state.currentPOI = nextPoi
+			state.walkTarget = nextPoi.pos
+		end
+		return
+	end
+
+	-- Tier 1: Soft recovery (elapsed < 20s)
+	-- Fix 5: Removed the random adjacent-tile nudge that caused oscillation.
+	-- Only stop, open doors, and advance waypoint if hunting.
+	if elapsed < 20 then
+		player:stopWalk()
+		player:setTarget(nil)
+		player:setFollowCreature(nil)
+
+		if inPz then
+			BotSystem.clearCombat(state, player)
+		end
+
+		-- Check adjacent doors and try to open them
+		BotSystem.tryOpenDoors(player, currentPos, state)
+
+		-- Advance hunt waypoint if stuck on current one
+		if state.state == BOT_STATE.HUNTING and state.huntWaypointIdx then
+			state.huntWaypointIdx = (state.huntWaypointIdx or 0) + 1
+		elseif state.currentWaypoint then
+			state.currentWaypoint = state.currentWaypoint + 1
+		end
+
+		return
+	end
+
+	-- Tier 2: Route / State Reset (20s <= elapsed < 40s)
+	if elapsed < 40 then
+		player:stopWalk()
+		player:setTarget(nil)
+		player:setFollowCreature(nil)
+		state.cavebotCommand = nil
+		state.cavebotTarget = nil
+		state.cavebotNavRoute = nil
+		state.navDepotTarget = nil
+
+		-- Fix 4: When hunting, use abortHunt to properly release the reservation
+		if state.state == BOT_STATE.HUNTING then
+			BotSystem.abortHunt(player, state, "stuck tier 2")
+		elseif inPz or state.state == BOT_STATE.IDLE or state.state == BOT_STATE.TRAVELING then
+			BotSystem.clearCombat(state, player)
+			-- Fix 4: Release hunt reservation if somehow still held
+			if state.huntScriptId then
+				BotHuntData.releaseHunt(state.huntScriptId, player:getGuid())
+				state.huntScriptId = nil
+			end
+			state.state = BOT_STATE.IDLE
+			state.idleStartTime = os.time()
+		end
+		return
+	end
+
+	-- Tier 3: Emergency Teleport Failsafe (elapsed >= 40s)
+	local town = player:getTown()
+	local templePos = town and town:getTemplePosition()
+	local teleportTarget = nil
+
+	if inPz or not (state.huntProfile and state.huntProfile.startPos) then
+		teleportTarget = templePos
+	else
+		teleportTarget = state.huntProfile.startPos
+	end
+
+	if teleportTarget then
+		logger.error(string.format("[BotStuck] Bot %s hard stuck for %ds — emergency teleport to (%d,%d,%d)",
+			player:getName(), elapsed, teleportTarget.x, teleportTarget.y, teleportTarget.z))
+		player:stopWalk()
+		player:teleportTo(teleportTarget)
+	end
+
+	-- Record impediment in database
+	local botName = player:getName()
+	local huntName = (state.huntProfile and state.huntProfile.name) or ""
+	local townName = (town and town:getName()) or ""
+	local details = string.format("Stuck %s at %d,%d,%d for %ds", stuckType, currentPos.x, currentPos.y, currentPos.z, elapsed)
+	pcall(function()
+		db.asyncQuery(string.format(
+			"INSERT INTO `bot_impediments` (`bot_name`, `hunt_name`, `town_name`, `impediment_type`, `badge_label`, `details`, `pos_x`, `pos_y`, `pos_z`, `resolved`, `created_at`) " ..
+			"VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %d, %d, %d, 1, NOW())",
+			botName, huntName, townName, stuckType, "auto_healed", details, currentPos.x, currentPos.y, currentPos.z
+		))
+	end)
+
+	-- Reset stuck state after teleport
+	state.stuckStartTime = nil
+	state.walkHistory = {}
+	state.walkHistoryIdx = 0
+	if inPz then
+		BotSystem.clearCombat(state, player)
+	end
+end
+
+function BotSystem.checkAndResolveStuck(player, state, currentPos, inPz)
+	-- Skip stuck evaluation for bots in training dummy state or inactive
+	if state.state == BOT_STATE.TRAINING or state.state == BOT_STATE.INACTIVE then
+		state.stuckStartTime = nil
+		return
+	end
+
+	local isMovingState = (
+		state.state == BOT_STATE.HUNTING or
+		state.state == BOT_STATE.TRAVELING or
+		state.state == BOT_STATE.EXPLORING or
+		state.cavebotCommand ~= nil or
+		player:isWalking()
+	)
+
+	local inCombat = (state.huntMonsterTarget ~= nil) or (player and player:getTarget() ~= nil)
+	local stuckType = BotSystem.detectStuckOrErratic(state, currentPos, isMovingState, inCombat)
+	if stuckType then
+		BotSystem.resolveStuck(player, state, currentPos, stuckType, inPz)
+	else
+		-- If not stuck, decay stuckStartTime if bot has been moving normally
+		if state.stuckStartTime and isMovingState then
+			state.stuckStartTime = nil
+		end
+	end
 end
 
 -- ============================================================================
@@ -2631,54 +3039,7 @@ function BotSystem.setPopulation(targetCount, opts)
 	local emit = opts.emit or function(msg) logger.info("[BotPopulation:{}] {}", source, msg) end
 	targetCount = math.max(0, tonumber(targetCount) or 0)
 
-	emit(string.format("Ajustando populacao para %d bots...", targetCount))
-
-	-- 1. Desativar e deslogar todos os bots atualmente online no mundo
-	local despawned = 0
-	if Game.getPlayers then
-		for _, p in ipairs(Game.getPlayers()) do
-			if p and not p:isRemoved() then
-				local name = p:getName()
-				local acc = p:getAccountId()
-				if name:sub(1, 4) == "Bot " or acc == BOT_CONFIG.BOT_ACCOUNT_ID or (acc >= 77 and acc <= 151) then
-					local guid = p:getGuid()
-					if botThinkEvents and botThinkEvents[guid] then
-						stopEvent(botThinkEvents[guid])
-						botThinkEvents[guid] = nil
-					end
-					pcall(BotSystem.deactivateBot, p)
-					pcall(function() p:remove() end)
-					despawned = despawned + 1
-				end
-			end
-		end
-	end
-
-	-- Limpa registros em BotPlayers
-	for guid, p in pairs(BotPlayers or {}) do
-		if p and not p:isRemoved() then
-			if botThinkEvents and botThinkEvents[guid] then
-				stopEvent(botThinkEvents[guid])
-				botThinkEvents[guid] = nil
-			end
-			pcall(BotSystem.deactivateBot, p)
-			pcall(function() p:remove() end)
-			despawned = despawned + 1
-		end
-	end
-
-	BotPlayers = {}
-	BotActive = {}
-	BotState = {}
-	if BotDebugPinned then BotDebugPinned = {} end
-
-	-- Limpa registros de bots em players_online
-	db.botAsyncQuery(string.format(
-		"DELETE FROM `players_online` WHERE `player_id` IN (SELECT `id` FROM `players` WHERE `account_id` = %d OR `account_id` BETWEEN 77 AND 151 OR `name` LIKE 'Bot %%%%')",
-		BOT_CONFIG.BOT_ACCOUNT_ID
-	))
-
-	emit(string.format("Deslogados e removidos %d bots ativos.", despawned))
+	emit(string.format("Ajustando populacao para %d bots (prioridade por level decrescente)...", targetCount))
 
 	-- Atualiza configuracao em memoria e no banco
 	BOT_CONFIG.TARGET_ONLINE = targetCount
@@ -2687,14 +3048,53 @@ function BotSystem.setPopulation(targetCount, opts)
 		targetCount, targetCount
 	))
 
+	-- 1. Se alvo for 0, desativa e desloga todos
 	if targetCount == 0 then
-		emit("Populacao zerada. Nenhum bot ativo no mundo.")
+		local despawned = 0
+		if Game.getPlayers then
+			for _, p in ipairs(Game.getPlayers()) do
+				if p and not p:isRemoved() then
+					local name = p:getName()
+					local acc = p:getAccountId()
+					if name:sub(1, 4) == "Bot " or acc == BOT_CONFIG.BOT_ACCOUNT_ID or (acc >= 77 and acc <= 151) then
+						local guid = p:getGuid()
+						if botThinkEvents and botThinkEvents[guid] then
+							stopEvent(botThinkEvents[guid])
+							botThinkEvents[guid] = nil
+						end
+						pcall(BotSystem.deactivateBot, p)
+						pcall(function() p:remove() end)
+						despawned = despawned + 1
+					end
+				end
+			end
+		end
+		for guid, p in pairs(BotPlayers or {}) do
+			if p and not p:isRemoved() then
+				if botThinkEvents and botThinkEvents[guid] then
+					stopEvent(botThinkEvents[guid])
+					botThinkEvents[guid] = nil
+				end
+				pcall(BotSystem.deactivateBot, p)
+				pcall(function() p:remove() end)
+				despawned = despawned + 1
+			end
+		end
+		BotPlayers = {}
+		BotActive = {}
+		BotState = {}
+		if BotDebugPinned then BotDebugPinned = {} end
+		db.botAsyncQuery(string.format(
+			"DELETE FROM `players_online` WHERE `player_id` IN (SELECT `id` FROM `players` WHERE `account_id` = %d OR `account_id` BETWEEN 77 AND 151 OR `name` LIKE 'Bot %%%%')",
+			BOT_CONFIG.BOT_ACCOUNT_ID
+		))
+		emit(string.format("Populacao zerada. Deslogados %d bots ativos.", despawned))
 		return { ok = true, message = "Populacao zerada com sucesso", count = 0 }
 	end
 
-	-- 2. Buscar bots no banco de dados
-	local query = "SELECT `id`, `name` FROM `players` WHERE (`account_id` = " .. BOT_CONFIG.BOT_ACCOUNT_ID
-		.. " OR `name` LIKE 'Bot %') AND `deletion` = 0 ORDER BY `id` ASC"
+	-- 2. Buscar bots no banco de dados ordenados estritamente por LEVEL DESC, EXPERIENCE DESC
+	local query = "SELECT `id`, `name`, `level`, `experience` FROM `players` WHERE (`account_id` = " .. BOT_CONFIG.BOT_ACCOUNT_ID
+		.. " OR `name` LIKE 'Bot %') AND `deletion` = 0 ORDER BY `level` DESC, `experience` DESC"
 	local resultId = db.storeQuery(query)
 	if not resultId then
 		emit("Nenhum bot encontrado no banco de dados!")
@@ -2708,106 +3108,141 @@ function BotSystem.setPopulation(targetCount, opts)
 	Result.free(resultId)
 
 	local total = #allBotNames
-	local botNames = {}
+	local targetCountClamped = math.min(targetCount, total)
 
-	-- Se houver nomes alvos especificos
+	-- Determinar lista alvo (top N bots por level)
+	local targetNamesList = {}
+	local targetNamesSet = {}
+
+	-- Se houver nomes alvos especificos via opts
 	if opts.targetNames and #opts.targetNames > 0 then
 		local inDb = {}
 		for _, n in ipairs(allBotNames) do inDb[n:lower()] = n end
 		for _, wanted in ipairs(opts.targetNames) do
 			local actual = inDb[wanted:lower()]
-			if actual and #botNames < targetCount then
-				table.insert(botNames, actual)
+			if actual and #targetNamesList < targetCountClamped and not targetNamesSet[actual] then
+				table.insert(targetNamesList, actual)
+				targetNamesSet[actual] = true
 			end
 		end
 	end
 
-	-- Bots de teste preferidos se poucos bots
-	if #botNames == 0 and targetCount <= 5 then
-		local preferredTestBots = { "Bot Titus", "Bot Kallum", "Bot Eamon", "Bot Valdemar", "Bot Sylas" }
-		local inDb = {}
-		for _, n in ipairs(allBotNames) do inDb[n] = true end
-		for _, pref in ipairs(preferredTestBots) do
-			if #botNames < targetCount and inDb[pref] then
-				table.insert(botNames, pref)
+	-- Preencher restante rigorosamente do topo de level para baixo
+	for _, name in ipairs(allBotNames) do
+		if #targetNamesList >= targetCountClamped then break end
+		if not targetNamesSet[name] then
+			table.insert(targetNamesList, name)
+			targetNamesSet[name] = true
+		end
+	end
+
+	-- 3. Mapear bots atualmente online no mundo
+	local onlineBotsByName = {}
+	local onlineCount = 0
+	if Game.getPlayers then
+		for _, p in ipairs(Game.getPlayers()) do
+			if p and not p:isRemoved() then
+				local name = p:getName()
+				local acc = p:getAccountId()
+				if name:sub(1, 4) == "Bot " or acc == BOT_CONFIG.BOT_ACCOUNT_ID or (acc >= 77 and acc <= 151) then
+					onlineBotsByName[name] = p
+					onlineCount = onlineCount + 1
+				end
+			end
+		end
+	end
+	for guid, p in pairs(BotPlayers or {}) do
+		if p and not p:isRemoved() then
+			local name = p:getName()
+			if not onlineBotsByName[name] then
+				onlineBotsByName[name] = p
+				onlineCount = onlineCount + 1
 			end
 		end
 	end
 
-	-- Selecao estratificada
-	if #botNames < targetCount then
-		local chosen = {}
-		for _, n in ipairs(botNames) do chosen[n] = true end
-		if targetCount >= total then
-			for _, n in ipairs(allBotNames) do
-				if not chosen[n] and #botNames < targetCount then
-					table.insert(botNames, n)
-					chosen[n] = true
-				end
+	-- 4. Verificar se a populacao ja esta identica ao alvo
+	local diffFound = false
+	if onlineCount ~= #targetNamesList then
+		diffFound = true
+	else
+		for _, name in ipairs(targetNamesList) do
+			if not onlineBotsByName[name] then
+				diffFound = true
+				break
 			end
-		else
-			for i = 0, targetCount - 1 do
-				local idx = math.floor(i * total / targetCount) + 1
-				local candidate = allBotNames[idx]
-				if not chosen[candidate] and #botNames < targetCount then
-					table.insert(botNames, candidate)
-					chosen[candidate] = true
-				end
+		end
+	end
+
+	if not diffFound then
+		emit(string.format("Populacao ja esta exatamente em %d bots (top de level ativos). Nenhuma alteracao necessaria.", #targetNamesList))
+		return {
+			ok = true,
+			message = string.format("Populacao ja em %d bots (inalterada)", #targetNamesList),
+			count = #targetNamesList
+		}
+	end
+
+	-- 5. Escala incremental: Desativar apenas quem NAO deve estar online (os de menor level)
+	local despawned = 0
+	for name, p in pairs(onlineBotsByName) do
+		if not targetNamesSet[name] then
+			local guid = p:getGuid()
+			if botThinkEvents and botThinkEvents[guid] then
+				stopEvent(botThinkEvents[guid])
+				botThinkEvents[guid] = nil
 			end
-			-- Fallback para preencher exatamente targetCount caso haja colisoes de arredondamento
-			if #botNames < targetCount then
-				for _, candidate in ipairs(allBotNames) do
-					if not chosen[candidate] and #botNames < targetCount then
-						table.insert(botNames, candidate)
-						chosen[candidate] = true
+			pcall(BotSystem.deactivateBot, p)
+			pcall(function() p:remove() end)
+			if BotPlayers then BotPlayers[guid] = nil end
+			if BotActive then BotActive[guid] = nil end
+			if BotState then BotState[guid] = nil end
+			db.botAsyncQuery("DELETE FROM `players_online` WHERE `player_id` = " .. guid)
+			despawned = despawned + 1
+		end
+	end
+	if despawned > 0 then
+		emit(string.format("Desativados %d bots de menor level para adequar a populacao.", despawned))
+	end
+
+	-- 6. Escala incremental: Ativar apenas quem DEVE estar online e ainda nao esta
+	local toAdd = {}
+	for _, name in ipairs(targetNamesList) do
+		if not onlineBotsByName[name] then
+			table.insert(toAdd, name)
+		end
+	end
+
+	if #toAdd > 0 then
+		emit(string.format("Ativando incrementalmente %d novos bots do topo de level...", #toAdd))
+		local STAGGER_MS = 50
+		for i, name in ipairs(toAdd) do
+			addEvent(function()
+				local p = Game.loadBotPlayer(name)
+				if p then
+					local guid = p:getGuid()
+					BotPlayers[guid] = p
+					p:registerEvent("BotDeath")
+					BotSystem.applyQuestStorages(p)
+					local ok, err = pcall(BotSystem.activateBot, p)
+					if not ok then
+						logger.error("[BotPopulation] Erro ao ativar " .. name .. ": " .. tostring(err))
 					end
+					db.botAsyncQuery("INSERT IGNORE INTO `players_online` (`player_id`) VALUES (" .. guid .. ")")
+					if i % 10 == 0 or i == #toAdd then
+						emit(string.format("Ativado bot %d/%d: %s", i, #toAdd, name))
+					end
+				else
+					logger.warn("[BotPopulation] Falha ao carregar bot: " .. name)
 				end
-			end
+			end, i * STAGGER_MS)
 		end
-	end
-
-	emit(string.format("Carregando %d bots selecionados (de %d no banco)...", #botNames, total))
-
-	-- Carregamento escalonado (staggered, 50ms)
-	local STAGGER_MS = 50
-	for i, name in ipairs(botNames) do
-		addEvent(function()
-			local p = Game.loadBotPlayer(name)
-			if p then
-				local guid = p:getGuid()
-				BotPlayers[guid] = p
-				p:registerEvent("BotDeath")
-
-				-- Aplica storages necessarios
-				BotSystem.applyQuestStorages(p)
-
-				-- Ativa inteligencia do bot
-				local ok, err = pcall(BotSystem.activateBot, p)
-				if not ok then
-					logger.error("[BotPopulation] Erro ao ativar " .. name .. ": " .. tostring(err))
-				end
-
-				if #botNames <= 10 and BotState and BotState[guid] then
-					BotState[guid].verboseLog = true
-					BotState[guid].verboseLogAutoEnabled = true
-				end
-
-				-- Sincroniza em players_online
-				db.botAsyncQuery("INSERT IGNORE INTO `players_online` (`player_id`) VALUES (" .. guid .. ")")
-
-				if i % 10 == 0 or i == #botNames then
-					emit(string.format("Carregado e ativado bot %d/%d: %s", i, #botNames, name))
-				end
-			else
-				logger.warn("[BotPopulation] Falha ao carregar bot: " .. name)
-			end
-		end, i * STAGGER_MS)
 	end
 
 	return {
 		ok = true,
-		message = string.format("Populacao ajustada para %d bots", #botNames),
-		count = #botNames
+		message = string.format("Populacao ajustada incrementalmente para %d bots (top de level)", #targetNamesList),
+		count = #targetNamesList
 	}
 end
 
@@ -3116,24 +3551,18 @@ function BotSystem.executeReload(opts)
 				end
 			end
 
-			-- Fill remaining slots from onlineGuids (preserves "previously online" preference)
-			for _, guid in ipairs(onlineGuids) do
-				if #activateGuids >= debugCount then break end
-				if not picked[guid] then
-					picked[guid] = true
-					activateGuids[#activateGuids + 1] = guid
+			-- Fill remaining slots ordered by bot level descending (top level bots first)
+			local candidates = {}
+			for guid, ref in pairs(BotPlayers or {}) do
+				if not picked[guid] and ref and not ref:isRemoved() then
+					table.insert(candidates, { guid = guid, level = ref:getLevel() or 1 })
 				end
 			end
-
-			-- Still not enough? Fall back to any registered bot
-			if #activateGuids < debugCount then
-				for guid, _ in pairs(BotPlayers or {}) do
-					if #activateGuids >= debugCount then break end
-					if not picked[guid] then
-						picked[guid] = true
-						activateGuids[#activateGuids + 1] = guid
-					end
-				end
+			table.sort(candidates, function(a, b) return a.level > b.level end)
+			for _, cand in ipairs(candidates) do
+				if #activateGuids >= debugCount then break end
+				picked[cand.guid] = true
+				activateGuids[#activateGuids + 1] = cand.guid
 			end
 
 			-- These are the debug targets — debug stream will be enabled on them.
@@ -4930,6 +5359,12 @@ end
 function BotSystem.activateBot(player, opts)
 	opts = opts or {}
 	local guid = player:getGuid()
+	-- Hunt tester workers are driven exclusively by the HuntTester tick loop;
+	-- never start the autonomous brain on them.
+	if BotSystem.isHuntTesterWorker(guid) then
+		return
+	end
+	BotPlayers[guid] = player
 	if not BotState[guid] then
 		BotSystem.initBot(player)
 	end
@@ -5034,9 +5469,8 @@ function BotSystem.activateBot(player, opts)
 		player:setFightMode(1)
 	end
 
-	-- Learn all spells for this vocation (attack + healing)
+	-- Learn all spells for this vocation (attack + healing) with cache guard
 	BotSystem.learnAllSpells(player)
-	pcall(function() player:save() end)
 
 	-- Equip best gear for level and vocation
 	BotSystem.equipBot(player)
@@ -5095,6 +5529,50 @@ function BotSystem.deactivateBot(player)
 		-- Fallback position if storage tile fails
 		player:teleportTo(Position(31970, 32283, 7))
 	end
+end
+
+-- ============================================================================
+-- Hunt Tester worker registry
+-- The HuntTester drives its worker characters (the "Tester N" GODs) through
+-- waypoints with its own tick loop. Those workers also get registered into
+-- BotPlayers so bot helpers work, which would otherwise make the autonomous
+-- brain (watchdog -> activateBot -> NotJev HUNT -> teleport-to-cave) fight the
+-- tester for control. Marking a worker here tells the brain to stay out.
+-- ============================================================================
+
+function BotSystem.markHuntTesterWorker(guid, on)
+	if not guid then return end
+	if on == false then
+		HuntTesterWorkers[guid] = nil
+	else
+		HuntTesterWorkers[guid] = true
+	end
+end
+
+-- A character is a HuntTester worker if it was explicitly marked, OR it is one
+-- of the dedicated tester GODs (named "Tester" / "Tester N"). The name check
+-- makes the guard reload-safe: the autonomous brain stays off testers even
+-- before the HuntTester re-marks them after a hot-reload.
+local function nameIsTesterWorker(name)
+	if not name then return false end
+	if name == "Tester" then return true end
+	return name:sub(1, 7) == "Tester " and tonumber(name:sub(8)) ~= nil
+end
+
+function BotSystem.isHuntTesterWorker(guid)
+	local player = nil
+	if type(guid) == "userdata" and guid.getGuid then
+		player = guid
+		guid = guid:getGuid()
+	end
+	if guid ~= nil and HuntTesterWorkers[guid] == true then
+		return true
+	end
+	player = player or (guid and (BotPlayers[guid] or Player(guid)))
+	if player and player.getName then
+		return nameIsTesterWorker(player:getName())
+	end
+	return false
 end
 
 -- ============================================================================
@@ -5247,15 +5725,110 @@ function BotSystem.shouldBotTrain(player, state, skillInfo)
 	return false
 end
 
+-- ============================================================================
+-- Fase 5: stake de morte em PvP.
+-- Em morte causada por outro jogador/bot, há CHANCE de perder 1 item equipado;
+-- ao voltar, o slot perdido é re-equipado com o equivalente de BRACKET INFERIOR
+-- (escada 100->50->20->8), via BotEquipmentData. Morte PvE segue como antes.
+-- ============================================================================
+BotSystem.PVP_DEATH_ITEM_LOSS_CHANCE = BotSystem.PVP_DEATH_ITEM_LOSS_CHANCE or 0.6
+
+local PVP_LOSS_SLOTS = {
+	{ field = "slot_head",  slot = CONST_SLOT_HEAD },
+	{ field = "slot_armor", slot = CONST_SLOT_ARMOR },
+	{ field = "slot_legs",  slot = CONST_SLOT_LEGS },
+	{ field = "slot_feet",  slot = CONST_SLOT_FEET },
+	{ field = "slot_right", slot = CONST_SLOT_LEFT },   -- arma
+	{ field = "slot_left",  slot = CONST_SLOT_RIGHT },  -- escudo
+}
+
+local function lowerBracketLevel(level)
+	if level >= 100 then return 50
+	elseif level >= 50 then return 20
+	elseif level >= 20 then return 8
+	else return 8 end
+end
+
+function BotSystem.applyPvpDeathPenalty(player, state)
+	if not player or player:isRemoved() then return end
+	if math.random() > BotSystem.PVP_DEATH_ITEM_LOSS_CHANCE then return end
+
+	-- escolhe aleatoriamente um slot de corpo que tenha item agora
+	local candidates = {}
+	for _, s in ipairs(PVP_LOSS_SLOTS) do
+		local it = player:getSlotItem(s.slot)
+		if it and not it:isRemoved() then candidates[#candidates + 1] = s end
+	end
+	if #candidates == 0 then return end
+
+	local pick = candidates[math.random(#candidates)]
+	local it = player:getSlotItem(pick.slot)
+	local lostName = (it and it:getName()) or "item"
+	pcall(function() it:remove() end) -- a perda
+
+	local guid = player:getGuid()
+	local level = player:getLevel()
+	local voc = player:getVocation()
+	local baseVoc = (voc and voc:getBaseId()) or 4
+	local personality = (state and state.personality) or ((guid % 5) + 1)
+	local dlevel = lowerBracketLevel(level)
+
+	logger.info(string.format("[BotDeath:PvP] %s perdeu %s; voltara com tier inferior (bracket de lv%d).",
+		player:getName(), lostName, dlevel))
+
+	-- re-equipa o slot perdido com o equivalente de bracket inferior, APOS respawn/activate
+	addEvent(function()
+		local p = Player(guid)
+		if not p or p:isRemoved() then return end
+		local loadout = BotEquipmentData and BotEquipmentData.getLoadout
+			and BotEquipmentData.getLoadout(dlevel, baseVoc, personality, p)
+		if not loadout then return end
+		local itemId = loadout[pick.field]
+		if itemId and itemId > 0 then
+			pcall(function() p:setSlotItem(pick.slot, itemId, 1) end)
+			logger.info(string.format("[BotDeath:PvP] %s re-equipado no slot perdido com item inferior (id %d).",
+				p:getName(), itemId))
+		end
+	end, 5000)
+end
+
 function BotSystem.onBotDeath(player, killer, mostDamageKiller)
 	if not player or player:isRemoved() then return end
 	local guid = player:getGuid()
 	local state = BotState and BotState[guid]
 	if not state then return end
 
-	local killerName = (killer and killer:getName()) or (mostDamageKiller and mostDamageKiller:getName()) or "monstro"
-	state.lastDeathTime = os.time()
+	local now = os.time()
+	local pvpKillerGuid = nil
+	local pvpKillerName = nil
+	if (killer and killer:isPlayer()) then
+		pvpKillerGuid = killer:getGuid()
+		pvpKillerName = killer:getName()
+	elseif (mostDamageKiller and mostDamageKiller:isPlayer()) then
+		pvpKillerGuid = mostDamageKiller:getGuid()
+		pvpKillerName = mostDamageKiller:getName()
+	elseif state.lastPvpAttackerGuid and (now - (state.lastPvpAttackerTime or 0)) <= 15 then
+		pvpKillerGuid = state.lastPvpAttackerGuid
+		pvpKillerName = state.lastPvpAttackerName
+	end
+
+	local killerName = pvpKillerName or (killer and killer:getName()) or (mostDamageKiller and mostDamageKiller:getName()) or "monstro"
+	state.lastDeathTime = now
+	state.deathPauseUntil = now + 4
 	state.deathCount = (state.deathCount or 0) + 1
+
+	-- Notifica a engine de disputa (marca vivo/morto, resolve vencedor FFA)
+	if BotDispute and BotDispute.notifyDeath then
+		pcall(function() BotDispute.notifyDeath(guid, pvpKillerGuid) end)
+	end
+
+	-- Fase 5: morte em PvP tem stake (chance de perder 1 item + re-equipe com tier inferior)
+	do
+		local pvpKiller = (killer and killer:isPlayer() and killer) or (mostDamageKiller and mostDamageKiller:isPlayer() and mostDamageKiller) or (pvpKillerGuid and Player(pvpKillerGuid))
+		if pvpKiller and BotSystem.applyPvpDeathPenalty then
+			pcall(function() BotSystem.applyPvpDeathPenalty(player, state) end)
+		end
+	end
 
 	local diedInHunt = state.huntScriptId
 	state.lastDeathCaveId = diedInHunt
@@ -5285,6 +5858,36 @@ function BotSystem.onBotDeath(player, killer, mostDamageKiller)
 
 	logger.info(string.format("[BotDeath] %s (Archetype: %s) died to %s in cave %s (death #%d, caveDeaths=%d)",
 		player:getName(), arch.name, killerName, tostring(diedInHunt), state.deathCount, state.recentDeathsInCave or 0))
+
+	-- BotPolitics Death & Hunted retaliation
+	if BotPolitics then
+		local realKiller = (killer and killer:isPlayer() and killer) or (mostDamageKiller and mostDamageKiller:isPlayer() and mostDamageKiller)
+		if realKiller then
+			local kName = realKiller:getName()
+			local vName = player:getName()
+			local kGuild = realKiller:getGuild()
+			local vGuild = player:getGuild()
+
+			if kGuild and BotPolitics.isPlayerHunted and BotPolitics.isPlayerHunted(kGuild:getId(), vName) then
+				BotPolitics.clearHunted(kGuild:getId(), vName, "AVENGED")
+				Game.broadcastMessage(string.format("[Guild Intel] O alvo HUNTED '%s' foi abatido por %s da guilda '%s'!",
+					vName, kName, kGuild:getName()), MESSAGE_GAME_HIGHLIGHT)
+			end
+
+			if vGuild and (not kGuild or kGuild:getId() ~= vGuild:getId()) then
+				BotPolitics.declareHunted(vGuild:getId(), kName, "Assassinato de " .. vName, 15000)
+
+				if kGuild and BotPolitics.declareWar then
+					_G.GuildKillCounters = _G.GuildKillCounters or {}
+					local warKey = string.format("%d_%d", math.min(vGuild:getId(), kGuild:getId()), math.max(vGuild:getId(), kGuild:getId()))
+					_G.GuildKillCounters[warKey] = (_G.GuildKillCounters[warKey] or 0) + 1
+					if _G.GuildKillCounters[warKey] >= 3 then
+						BotPolitics.declareWar(vGuild:getId(), kGuild:getId(), "Escalada de mortes mutuas entre membros")
+					end
+				end
+			end
+		end
+	end
 
 	if arch.id == 2 then -- Arrojado (Rusher)
 		if diedInHunt and (state.recentDeathsInCave or 0) < 2 then
@@ -5317,6 +5920,8 @@ function BotSystem.onBotDeath(player, killer, mostDamageKiller)
 		local p = Player(guid)
 		if p and not p:isRemoved() then
 			BotSystem.applyBotBlessings(p)
+			local s = BotState and BotState[guid]
+			BotSystem.checkEquipmentCompleteness(p, s)
 		end
 	end, 3500)
 end
@@ -5920,7 +6525,8 @@ function BotSystem.hardResetAllBots(initiatorPlayer)
 		p:setMaxMana(90)
 		p:setMana(90)
 		if p.setCapacity then
-			pcall(function() p:setCapacity(47000) end)
+			-- cap generosa p/ bots (pots nao pesam); piso tambem aplicado em checkEquipmentCompleteness
+			pcall(function() p:setCapacity(2000000) end)
 		end
 		p:setMagicLevel(0)
 		p:setSkillLevel(SKILL_FIST, 10)
@@ -5973,29 +6579,47 @@ end
 
 function BotSystem.thinkEvent(guid)
 	botThinkEvents[guid] = nil
+	-- Hunt tester workers are driven exclusively by the HuntTester tick loop.
+	-- If a stale think event ever fires on one, kill the brain here so it can
+	-- never self-heal BotActive and fight the tester for control.
+	if BotSystem.isHuntTesterWorker(guid) then
+		BotActive[guid] = false
+		return
+	end
 	-- JITTER DIAGNOSTIC: per-bot thinkEvent timing. Threshold 10ms.
 	local jitter_thinkStart = Game.monotonicMs and Game.monotonicMs() or 0
 	local jitter_botName = nil
 
 	local player = BotPlayers[guid]
 	if not player or player:isRemoved() then
-		BotActive[guid] = false
-		return
+		local pFallback = Player(guid)
+		if pFallback and not pFallback:isRemoved() then
+			BotPlayers[guid] = pFallback
+			player = pFallback
+		else
+			BotActive[guid] = false
+			return
+		end
 	end
 	jitter_botName = player:getName()
 	if not BotActive[guid] then
 		local s = BotState[guid]
-		if s and s.state == BOT_STATE.INACTIVE then
-			if player.isCastBroadcasting and player:isCastBroadcasting() then
-				if player.setCastBroadcasting then
-					player:setCastBroadcasting(false)
+		if not s or s.state ~= BOT_STATE.INACTIVE then
+			BotActive[guid] = true
+			logger.warn(string.format("[Bot] Restored BotActive=true for %s (GUID %d) in thinkEvent", player:getName(), guid))
+		else
+			if s and s.state == BOT_STATE.INACTIVE then
+				if player.isCastBroadcasting and player:isCastBroadcasting() then
+					if player.setCastBroadcasting then
+						player:setCastBroadcasting(false)
+					end
+					pcall(function()
+						db.query("DELETE FROM `cast_broadcasters` WHERE `player_id` = " .. guid)
+					end)
 				end
-				pcall(function()
-					db.query("DELETE FROM `cast_broadcasters` WHERE `player_id` = " .. guid)
-				end)
 			end
+			return
 		end
-		return
 	end
 
 	local state = BotState[guid]
@@ -6007,6 +6631,33 @@ function BotSystem.thinkEvent(guid)
 	end
 
 	local ok, err = pcall(function()
+		local now = os.time()
+		if state.deathPauseUntil and now < state.deathPauseUntil then
+			return
+		end
+
+		local currentPos = player:getPosition()
+		local currentTile = Tile(currentPos)
+		local inPz = currentTile and currentTile:hasFlag(TILESTATE_PROTECTIONZONE)
+
+		-- Protection Zone Invariant: Bots can NEVER engage in PK, combat or fleeing inside PZ
+		if inPz then
+			if state.state == BOT_STATE.PK_ATTACK or state.state == BOT_STATE.COMBAT or state.state == BOT_STATE.FLEEING then
+				BotSystem.clearCombat(state, player)
+			end
+			if state.pkTarget or state.attackerId or state.ignoredAttackerId then
+				state.pkTarget = nil
+				state.attackerId = nil
+				state.ignoredAttackerId = nil
+				player:setTarget(nil)
+				player:setFollowCreature(nil)
+			end
+		end
+
+		-- Record position and check for stuck / erratic movement / cyclic loops
+		BotSystem.recordPosition(state, currentPos)
+		BotSystem.checkAndResolveStuck(player, state, currentPos, inPz)
+
 		-- Floor change state machine: if active, handle it before anything else
 		if state.floorChangeState ~= FLOOR_CHANGE_STATE.NONE then
 			-- During hunt patrol: check for nearby targets BEFORE running floor change.
@@ -6099,6 +6750,12 @@ function BotSystem.thinkEvent(guid)
 			state.lastUpkeepCheck = now
 			BotSystem.checkPaladinAmmo(player, state)
 			BotSystem.checkBotFoodAndRegen(player, state)
+		end
+
+		-- Periodic anti-pelado gear inspection (every 15s)
+		if not state.lastEquipCheck or (now - state.lastEquipCheck) >= 15 then
+			state.lastEquipCheck = now
+			BotSystem.checkEquipmentCompleteness(player, state)
 		end
 
 		-- Execucao da Inteligencia Artificial nativa por estado
@@ -6545,7 +7202,33 @@ function BotSystem.executeTempleTeleport(player, state, destTownId)
 	local curPos = player:getPosition()
 
 	pcall(function() curPos:sendMagicEffect(CONST_ME_TELEPORT) end)
-	player:teleportTo(destTemplePos)
+	local ok = player:teleportTo(destTemplePos, true)
+	if not ok then
+		-- If direct teleport fails (e.g. tile blocked), try adjacent tiles around temple
+		local offsets = {{0,1},{0,-1},{1,0},{-1,0},{1,1},{-1,-1},{1,-1},{-1,1}}
+		for _, off in ipairs(offsets) do
+			local altPos = Position(destTemplePos.x + off[1], destTemplePos.y + off[2], destTemplePos.z)
+			local altTile = Tile(altPos)
+			if altTile and altTile:isWalkable() then
+				if player:teleportTo(altPos, true) then
+					ok = true
+					destTemplePos = altPos
+					break
+				end
+			end
+		end
+	end
+
+	if not ok then
+		logger.warn(string.format("[BotTravel] Failed to teleport %s to %s Temple (Town %d)!",
+			player:getName(), destTown:getName(), destTownId))
+		state.state = BOT_STATE.IDLE
+		state.travelDestTownId = nil
+		state.travelTempleTarget = nil
+		state.huntCooldownUntil = os.time() + 30
+		return false
+	end
+
 	pcall(function() destTemplePos:sendMagicEffect(CONST_ME_TELEPORT) end)
 
 	player:setTown(destTown)
@@ -6561,6 +7244,11 @@ function BotSystem.executeTempleTeleport(player, state, destTownId)
 	state.currentPOI = nil
 	state.cavebotCommand = nil
 	state.state = BOT_STATE.IDLE
+	state.huntCooldownUntil = os.time() + 3
+	state.walkHistory = {}
+	state.walkHistoryIdx = 0
+	state.stuckStartTime = nil
+	state.pathFailCount = 0
 
 	logger.info(string.format("[BotTravel] %s reached Temple and was teleported to %s Temple (Town %d)!",
 		player:getName(), destTown:getName(), destTownId))
@@ -6587,11 +7275,19 @@ function BotSystem.startTempleTravel(player, state, destTownId, reason)
 	local pos = player:getPosition()
 	local dist = math.max(math.abs(pos.x - curTemplePos.x), math.abs(pos.y - curTemplePos.y))
 
-	-- If already at current temple, teleport immediately and restart hunt search cycle
+	-- If already at current temple, teleport immediately and let next tick evaluate hunt
 	if dist <= 2 and pos.z == curTemplePos.z then
-		BotSystem.executeTempleTeleport(player, state, destTownId)
-		BotSystem.tryStartHunt(player, state)
-		return true
+		state.templeRelocations = (state.templeRelocations or 0) + 1
+		if state.templeRelocations >= 3 then
+			logger.warn(string.format("[BotTravel] %s reached max consecutive temple relocations (%d) — applying 180s hunt backoff",
+				player:getName(), state.templeRelocations))
+			state.templeRelocations = 0
+			state.huntCooldownUntil = os.time() + 180
+			state.state = BOT_STATE.IDLE
+			return false
+		end
+
+		return BotSystem.executeTempleTeleport(player, state, destTownId)
 	end
 
 	state.state = BOT_STATE.TRAVELING
@@ -6640,15 +7336,12 @@ function BotSystem.doTraveling(player, state)
 		logger.warn(string.format("[BotTravel] %s took %ds to reach temple, forcing teleport to town %d",
 			player:getName(), elapsed, destTownId))
 		BotSystem.executeTempleTeleport(player, state, destTownId)
-		BotSystem.tryStartHunt(player, state)
 		return
 	end
 
 	-- Arrived at current city temple!
 	if dist <= 2 and pos.z == templePos.z then
 		BotSystem.executeTempleTeleport(player, state, destTownId)
-		-- Recomeca o ciclo de procura de hunt na nova cidade!
-		BotSystem.tryStartHunt(player, state)
 		return
 	end
 
@@ -6661,7 +7354,6 @@ function BotSystem.doTraveling(player, state)
 				logger.warn(string.format("[BotTravel] %s stuck on way to temple, forcing teleport to town %d",
 					player:getName(), destTownId))
 				BotSystem.executeTempleTeleport(player, state, destTownId)
-				BotSystem.tryStartHunt(player, state)
 			end
 		else
 			state.travelStuckCount = 0
@@ -6679,8 +7371,135 @@ function BotSystem.startTravel(player, state)
 end
 
 -- ============================================================================
--- Self-Defense: Fight or Flight
+-- Self-Defense: NotJev Archetype-Based Defense Evaluation
 -- ============================================================================
+
+function BotSystem.onBotDamagedByPlayer(bot, attacker, damage)
+	if not bot or bot:isRemoved() or not attacker or attacker:isRemoved() then return end
+	local guid = bot:getGuid()
+	local state = BotState and BotState[guid]
+	if not state or not BotActive or not BotActive[guid] then return end
+
+	-- Atualiza progresso se já estivermos em combate/PK contra este atacante
+	if state.state == BOT_STATE.PK_ATTACK and state.pkTarget == attacker:getId() then
+		state.lastCombatProgress = os.time()
+		return
+	end
+	if state.state == BOT_STATE.COMBAT and state.attackerId == attacker:getId() then
+		state.lastCombatProgress = os.time()
+		return
+	end
+
+	local tile = Tile(bot:getPosition())
+	if tile and tile:hasFlag(TILESTATE_PROTECTIONZONE) then return end
+
+	-- Dispara a decisão defensiva NotJev para reagir ao agressor
+	if not state.defenseInFlight then
+		BotSystem.requestNotjevDefense(bot, state, attacker)
+	end
+end
+
+function BotSystem.requestNotjevDefense(player, state, attacker)
+	if not player or player:isRemoved() or not state or not attacker or attacker:isRemoved() then return end
+	-- Self-guard: nunca "defender" contra si mesmo (evita "sendo agredido por <proprio nome>")
+	if attacker == player or attacker:getId() == player:getId() or attacker:getName() == player:getName() then return end
+	if state.defenseInFlight then return end
+
+	local myGuid = player:getGuid()
+	local arch = BotSystem.getBotArchetype(player, state)
+	local hpPercent = math.floor((player:getHealth() / math.max(player:getMaxHealth(), 1)) * 100)
+	local manaPercent = math.floor((player:getMana() / math.max(player:getMaxMana(), 1)) * 100)
+	local potionsCount = player:getItemCount(7618) + player:getItemCount(7588) + player:getItemCount(7589)
+		+ player:getItemCount(7620) + player:getItemCount(7590) + player:getItemCount(7591)
+
+	local ap = Player(attacker:getId())
+	local attackerLevel = ap and ap:getLevel() or 8
+	local attackerVoc = ap and ap:getVocation() and ap:getVocation():getName() or "Creature"
+	local attackerIsPlayer = ap ~= nil
+
+	local pos = player:getPosition()
+	local tpos = attacker:getPosition()
+	local dist = math.max(math.abs(pos.x - tpos.x), math.abs(pos.y - tpos.y))
+
+	local payload = {
+		bot_profile = {
+			name = player:getName(),
+			level = player:getLevel(),
+			vocation = player:getVocation() and player:getVocation():getName() or "Knight",
+			personality = arch.id,
+			archetype_id = arch.id,
+			archetype_name = arch.name,
+			hp_percent = hpPercent,
+			mana_percent = manaPercent,
+			potions = potionsCount
+		},
+		attacker_profile = {
+			name = attacker:getName(),
+			level = attackerLevel,
+			vocation = attackerVoc,
+			is_player = attackerIsPlayer
+		},
+		location = state.huntScriptId and ("Hunt #" .. tostring(state.huntScriptId)) or "Field",
+		distance = dist
+	}
+
+	state.defenseInFlight = true
+	BotSystem.asyncNodePost("/api/decision/defense", payload, function(res)
+		state.defenseInFlight = false
+		local p = BotPlayers and BotPlayers[myGuid]
+		local s = BotState and BotState[myGuid]
+		if not p or p:isRemoved() or not s then return end
+
+		local decision = tostring(res.decision or res.action or "FIGHT"):upper()
+		if decision == "IGNORE" then return end
+		local speech = res.speech or ""
+		if speech and #speech > 0 then
+			p:say(speech, TALKTYPE_SAY)
+		end
+
+		if decision == "FIGHT" then
+			logger.info(string.format("[NotJevDefense] %s (%s) FIGHTING %s!", p:getName(), arch.name, attacker:getName()))
+			BotSystem.clearAllTasks(p, s)
+			s.state = BOT_STATE.PK_ATTACK
+			s.pkTarget = attacker:getId()
+			s.pkStartTime = os.time()
+			s.lastAttackTime = 0
+			s.lastCombatProgress = os.time()
+			p:setTarget(attacker)
+		elseif decision == "FLEE" then
+			logger.info(string.format("[NotJevDefense] %s (%s) FLEEING from %s!", p:getName(), arch.name, attacker:getName()))
+			BotSystem.clearAllTasks(p, s)
+			s.state = BOT_STATE.FLEEING
+			s.attackerId = attacker:getId()
+			s.fleeStartTime = os.time()
+			if s.huntScriptId then
+				BotHuntData.releaseHunt(s.huntScriptId, myGuid)
+				s.huntScriptId = nil
+			end
+			local curTown = BotSystem.getActualBotTown(p)
+			local destTownId = (curTown == 8) and 6 or 8
+			BotSystem.startTempleTravel(p, s, destTownId, "Expelled by " .. attacker:getName())
+		elseif decision == "NEGOTIATE" then
+			logger.info(string.format("[NotJevDefense] %s (%s) NEGOTIATING with %s", p:getName(), arch.name, attacker:getName()))
+			s.state = BOT_STATE.FLEEING
+			s.attackerId = attacker:getId()
+			s.fleeStartTime = os.time()
+		elseif decision == "CALL_HELP" then
+			logger.info(string.format("[NotJevDefense] %s (%s) CALL_HELP vs %s", p:getName(), arch.name, attacker:getName()))
+			s.state = BOT_STATE.COMBAT
+			s.attackerId = attacker:getId()
+			s.lastCombatProgress = os.time()
+			p:setTarget(attacker)
+		end
+	end, function()
+		state.defenseInFlight = false
+		if arch.id == 1 then
+			state.state = BOT_STATE.FLEEING
+		else
+			state.state = BOT_STATE.COMBAT
+		end
+	end)
+end
 
 function BotSystem.doSelfDefense(player, state)
 	-- Don't interrupt PK mode or party mode
@@ -6688,6 +7507,11 @@ function BotSystem.doSelfDefense(player, state)
 	if state.state == BOT_STATE.PARTY then return end
 
 	local pos = player:getPosition()
+	local myTile = Tile(pos)
+	if myTile and myTile:hasFlag(TILESTATE_PROTECTIONZONE) then
+		BotSystem.clearCombat(state, player)
+		return
+	end
 
 	-- Handle "ignore" mode: we decided this attacker is too weak to bother with.
 	-- Optionally hit them once, then continue normal behavior.
@@ -6819,56 +7643,8 @@ function BotSystem.doSelfDefense(player, state)
 		state.preCombatPos = { x = combatPos.x, y = combatPos.y, z = combatPos.z }
 		state.zBreadcrumbs = {}
 
-		-- Level-based combat decision:
-		-- If bot significantly outlevels attacker (6x+ level),
-		-- fight chance drops from 50% to ~17%, and "ignore" replaces "flee".
-		local botLevel = player:getLevel()
-		local attackerLevel = 0
-		local ap = Player(attacker:getId())
-		if ap then attackerLevel = ap:getLevel() end
-
-		local outleveling = (attackerLevel > 0 and botLevel >= attackerLevel * 6)
-
-		if outleveling then
-			-- High-level bot vs weak attacker: 17% fight, 83% ignore
-			local roll = math.random(1, 6)
-			if roll == 1 then
-				state.state = BOT_STATE.COMBAT
-				state.combatDecision = "fight"
-				if math.random(1, 2) == 1 then
-					BotSystem.sayRandom(player, state, "combat")
-				end
-				logger.info("[Bot] " .. player:getName() .. " (lv" .. botLevel ..
-					") FIGHTING weaker attacker " .. attacker:getName() .. " (lv" .. attackerLevel .. ")")
-			else
-				-- Ignore: hit once maybe, then go back to normal
-				state.ignoredAttackerId = attacker:getId()
-				state.ignoredHitBack = false
-				state.combatDecision = nil
-				state.combatStartTime = nil
-				state.attackerId = nil
-				logger.info("[Bot] " .. player:getName() .. " (lv" .. botLevel ..
-					") IGNORING weak attacker " .. attacker:getName() .. " (lv" .. attackerLevel .. ")")
-				return
-			end
-		else
-			-- Normal case: 50% fight, 50% flee
-			if math.random(1, 2) == 1 then
-				state.state = BOT_STATE.COMBAT
-				state.combatDecision = "fight"
-				if math.random(1, 2) == 1 then
-					BotSystem.sayRandom(player, state, "combat")
-				end
-				logger.info("[Bot] " .. player:getName() .. " FIGHTING " .. attacker:getName())
-			else
-				state.state = BOT_STATE.FLEEING
-				state.combatDecision = "flee"
-				if math.random(1, 2) == 1 then
-					BotSystem.sayRandom(player, state, "flee")
-				end
-				logger.info("[Bot] " .. player:getName() .. " FLEEING from " .. attacker:getName())
-			end
-		end
+		-- Archetype-based defense reaction evaluated by NotJev System 1
+		BotSystem.requestNotjevDefense(player, state, attacker)
 	end
 
 	-- Update remembered attacker (in case a new closer one appeared)
@@ -7226,15 +8002,22 @@ function BotSystem.chaseTarget(player, state, target)
 		end
 	end
 
-	-- If pathfinding still fails, try clearing obstacles
+	-- If pathfinding still fails, try clearing obstacles (bot is trapped / blocked by monsters!)
 	if not dirs or type(dirs) ~= "table" or #dirs == 0 then
 		-- Try doors first
 		if BotSystem.tryOpenDoors(player, tpos) then return end
-		-- Try attacking blocking monsters/NPCs between us and the target
-		BotSystem.tryAttackBlockingCreature(player, state, tpos)
+		-- Bot is trapped/blocked: attack blocking monster to clear path
+		local attacked = BotSystem.tryAttackBlockingCreature(player, state, tpos)
+		if attacked then
+			state.attackingBlocker = true
+		else
+			state.attackingBlocker = nil
+		end
 		return
 	end
 
+	-- Caminho livre: persegue o player rival normalmente sem atacar monstros
+	state.attackingBlocker = nil
 	state.lastCombatProgress = os.time()
 	player:startAutoWalk(dirs)
 end
@@ -7276,12 +8059,13 @@ function BotSystem.tryAttackBlockingCreature(player, state, targetPos)
 						and not Player(creature) then
 						-- Found a monster/NPC blocking the path — attack it
 						BotSystem.doAttackCreature(player, state, creature)
-						return
+						return true
 					end
 				end
 			end
 		end
 	end
+	return false
 end
 
 -- Attack any creature (monster/NPC) to clear path.
@@ -7383,10 +8167,25 @@ function BotSystem.tryOpenDoors(player, targetPos, state)
 							else
 								logger.warn(string.format("[BotKey] %s bloqueado por porta trancada (Key #%d) em (%d,%d,%d)!",
 									player:getName(), reqKey, tilePos.x, tilePos.y, tilePos.z))
-								BotSystem.recordImpediment(player, huntId, nil, nil, "MISSING_KEY",
-									"Key #" .. reqKey,
-									string.format("Bloqueado por porta trancada em (%d,%d,%d) que exige Key #%d", tilePos.x, tilePos.y, tilePos.z, reqKey),
-									tilePos)
+								local now = os.time()
+								local bState = botState or (BotState and guid and BotState[guid])
+								local lastImpKey = string.format("key_door_%d_%d_%d", tilePos.x, tilePos.y, tilePos.z)
+								if bState then
+									bState.lastDoorImpediments = bState.lastDoorImpediments or {}
+									local lastTime = bState.lastDoorImpediments[lastImpKey] or 0
+									if (now - lastTime) >= 30 then
+										bState.lastDoorImpediments[lastImpKey] = now
+										BotSystem.recordImpediment(player, huntId, nil, nil, "MISSING_KEY",
+											"Key #" .. reqKey,
+											string.format("Bloqueado por porta trancada em (%d,%d,%d) que exige Key #%d", tilePos.x, tilePos.y, tilePos.z, reqKey),
+											tilePos)
+									end
+								else
+									BotSystem.recordImpediment(player, huntId, nil, nil, "MISSING_KEY",
+										"Key #" .. reqKey,
+										string.format("Bloqueado por porta trancada em (%d,%d,%d) que exige Key #%d", tilePos.x, tilePos.y, tilePos.z, reqKey),
+										tilePos)
+								end
 								return false
 							end
 						else
@@ -7588,7 +8387,39 @@ function BotSystem.checkCaveEncounter(player, state)
 	local caveName = script and script.name or "Cave"
 	local arch = BotSystem.getBotArchetype(player, state)
 
+	-- BotPolitics Cave Dominance & Activity hook
+	if BotPolitics and state.huntScriptId then
+		if BotPolitics.recordCaveActivity then
+			BotPolitics.recordCaveActivity(state.huntScriptId, player)
+		end
+	end
+
 	local myName = player:getName()
+
+	-- Check if rival is HUNTED by player's guild
+	local myGuild = player:getGuild()
+	if myGuild and BotPolitics and BotPolitics.isPlayerHunted then
+		local isHunted = BotPolitics.isPlayerHunted(myGuild:getId(), rivalName)
+		if isHunted then
+			player:say(string.format("ALVO HUNTED DETECTADO! %s, voce vai pagar pelos seus crimes contra a %s!", rivalName, myGuild:getName()), TALKTYPE_SAY)
+			logger.info(string.format("[BotPolitics:Hunted] %s found HUNTED target %s in cave %s! Attacking!", myName, rivalName, caveName))
+			BotSystem.clearAllTasks(player, state)
+			state.state = BOT_STATE.PK_ATTACK
+			state.pkTarget = rival:getId()
+			state.pkStartTime = os.time()
+			state.lastAttackTime = 0
+			state.lastCombatProgress = os.time()
+			player:setTarget(rival)
+			state.caveDisputeCooldownUntil = now + 60
+			return true
+		end
+	end
+
+	-- Check Territory Ultimatum / Tax Enforcement
+	if BotPolitics and BotPolitics.checkIntruderUltimatum and state.huntScriptId then
+		BotPolitics.checkIntruderUltimatum(rival, state.huntScriptId, player)
+	end
+
 	local rel = BotSystem.getRelationship(myName, rivalName)
 	local isInvadedRefusal = (rel.huntState == "INVADED_AFTER_REFUSAL") or (state.invadedRefusalRival == rivalGuid)
 
@@ -7620,7 +8451,7 @@ function BotSystem.checkCaveEncounter(player, state)
 			if mState and member:isBotPlayer() then
 				BotSystem.clearAllTasks(member, mState)
 				mState.state = BOT_STATE.PK_ATTACK
-				mState.pkTarget = rivalGuid
+				mState.pkTarget = rival:getId()
 				mState.pkStartTime = os.time()
 				mState.lastAttackTime = 0
 				mState.lastCombatProgress = os.time()
@@ -7648,11 +8479,20 @@ function BotSystem.checkCaveEncounter(player, state)
 				rival:say("Vem os dois entao que eu deito a party inteira!", TALKTYPE_SAY)
 				BotSystem.clearAllTasks(rival, rivalState)
 				rivalState.state = BOT_STATE.PK_ATTACK
-				rivalState.pkTarget = myGuid
+				rivalState.pkTarget = player:getId()
 				rivalState.pkStartTime = os.time()
 				rival:setTarget(player)
 			end
 		end
+		return true
+	end
+
+	-- Encontro fisico abre/ingressa numa SESSAO de disputa (arbitrada pela engine),
+	-- substituindo a chamada /dispute avulsa abaixo (mantida so como fallback).
+	if BotDispute and BotDispute.openOrJoin then
+		local rivalStateForDispute = BotState and BotState[rivalGuid]
+		BotDispute.openOrJoin(state.huntScriptId, player, state, rival, rivalStateForDispute)
+		state.caveDisputeCooldownUntil = now + 60
 		return true
 	end
 
@@ -7684,6 +8524,7 @@ function BotSystem.checkCaveEncounter(player, state)
 		if not p or p:isRemoved() or not s then return end
 
 		local decision = tostring(res.decision or res.action or "SHARE"):upper()
+		if decision == "IGNORE" then return end
 		local speech = res.speech or ""
 		local cooldown = tonumber(res.cooldown_seconds) or 900 -- 15 minutos padrão
 
@@ -7696,45 +8537,20 @@ function BotSystem.checkCaveEncounter(player, state)
 				p:getName(), p:getLevel(), rivalName, rivalLevel, caveName))
 			BotSystem.clearAllTasks(p, s)
 			s.state = BOT_STATE.PK_ATTACK
-			s.pkTarget = rivalGuid
+			s.pkTarget = Player(rivalGuid) and Player(rivalGuid):getId() or rivalGuid
 			s.pkStartTime = os.time()
 			s.lastAttackTime = 0
 			s.lastCombatProgress = os.time()
-			local targetCreature = Creature(rivalGuid)
+			local targetCreature = Player(rivalGuid)
 			if targetCreature and not targetCreature:isRemoved() then
 				p:setTarget(targetCreature)
 			end
 
-			-- Make rival react immediately so they fight or flee rather than standing still!
+			-- Make rival react immediately via NotJev based on their archetype!
 			local rivalPlayer = Player(rivalGuid)
 			local rivalState = BotState and BotState[rivalGuid]
 			if rivalPlayer and not rivalPlayer:isRemoved() and rivalState then
-				local rPers = rivalState.personality or 2
-				if rPers >= 4 then
-					-- Aggressive rival fights back!
-					rivalPlayer:say(string.format("Voce vai se arrepender de ter aberto skull em mim, %s!", p:getName()), TALKTYPE_SAY)
-					BotSystem.clearAllTasks(rivalPlayer, rivalState)
-					rivalState.state = BOT_STATE.PK_ATTACK
-					rivalState.pkTarget = myGuid
-					rivalState.pkStartTime = os.time()
-					rivalState.lastAttackTime = 0
-					rivalState.lastCombatProgress = os.time()
-					rivalPlayer:setTarget(p)
-				else
-					-- Cautious rival flees cave!
-					rivalPlayer:say("Calma mano, ja to saindo fora! Nao precisa pklizar!", TALKTYPE_SAY)
-					BotSystem.clearAllTasks(rivalPlayer, rivalState)
-					rivalState.state = BOT_STATE.FLEEING
-					rivalState.attackerId = myGuid
-					rivalState.fleeStartTime = os.time()
-					if rivalState.huntScriptId then
-						BotHuntData.releaseHunt(rivalState.huntScriptId, rivalGuid)
-						rivalState.huntScriptId = nil
-					end
-					local curTown = BotSystem.getActualBotTown(rivalPlayer)
-					local destTownId = (curTown == 8) and 6 or 8
-					BotSystem.startTempleTravel(rivalPlayer, rivalState, destTownId, "Expelled by PK " .. p:getName())
-				end
+				BotSystem.requestNotjevDefense(rivalPlayer, rivalState, p)
 			end
 		elseif decision == "PARTY" or decision == "SHARE" then
 			logger.info(string.format("[CaveDispute] %s (lv%d) agreed to PARTY/SHARE with %s (lv%d) in %s.",
@@ -7906,52 +8722,118 @@ end
 
 -- (Random PK handled by C++ BotEngine::checkRandomPK in bot_engine.cpp)
 
+function BotSystem.clearCombat(state, player)
+	state.pkTarget = nil
+	state.pkStartTime = nil
+	state.attackerId = nil
+	state.ignoredAttackerId = nil
+	state.chaseLastTargetPos = nil
+	state.targetLastSameZPos = nil
+	state.walkTarget = nil
+	state.currentPOI = nil
+	state.pvpManaSpent = nil
+	state.combatHpCheckTime = nil
+	state.combatHpBaseline = nil
+	state.combatStalemateCount = nil
+	if player and not player:isRemoved() then
+		player:setTarget(nil)
+		player:setFollowCreature(nil)
+		player:stopWalk()
+	end
+	if state.state == BOT_STATE.PK_ATTACK or state.state == BOT_STATE.COMBAT or state.state == BOT_STATE.FLEEING then
+		state.state = BOT_STATE.IDLE
+		state.idleStartTime = os.time()
+	end
+end
+
 function BotSystem.doPKAttack(player, state)
-	-- Use lastCombatProgress for timeout (updated each spell cast), not static pkStartTime
-	local lastProgress = state.lastCombatProgress or state.pkStartTime
-	if os.time() - lastProgress > BOT_CONFIG.PK_TIMEOUT then
-		BotSystem.exitPK(player, state)
-		return
-	end
-
-	local target = Creature(state.pkTarget)
-	if not target or target:isRemoved() or target:getHealth() <= 0 then
-		BotSystem.exitPK(player, state)
-		return
-	end
-
 	local pos = player:getPosition()
-	local tpos = target:getPosition()
-
-	-- PZ safety: stop attacking if target reached protection zone
-	local tTile = Tile(tpos)
-	if tTile and tTile:hasFlag(TILESTATE_PROTECTIONZONE) then
-		BotSystem.exitPK(player, state)
-		return
-	end
-
-	-- PZ safety: stop if bot itself is in PZ (shouldn't happen with proper skull, but safety net)
 	local myTile = Tile(pos)
+
+	-- PZ safety: stop immediately if bot itself is in PZ (never skull or attack in PZ!)
 	if myTile and myTile:hasFlag(TILESTATE_PROTECTIONZONE) then
-		BotSystem.exitPK(player, state)
+		BotSystem.clearCombat(state, player)
 		return
 	end
 
-	-- Leash distance check (same z only — allow z-pursuit through stairs)
-	if pos.z == tpos.z then
-		local dist = math.max(math.abs(pos.x - tpos.x), math.abs(pos.y - tpos.y))
-		if dist > 10 then
+	local inDisputeFight = false
+	local disputeSession = nil
+	if BotDispute and BotDispute.isPlayerInFight then
+		inDisputeFight, disputeSession = BotDispute.isPlayerInFight(player:getGuid())
+	end
+
+	-- Em disputa de cave ativa, o combate vai ATE A MORTE ou fuga para PZ!
+	-- Não abandona por timeout se o rival ainda estiver presente
+	local lastProgress = state.lastCombatProgress or state.pkStartTime
+	if not inDisputeFight then
+		if os.time() - lastProgress > BOT_CONFIG.PK_TIMEOUT then
 			BotSystem.exitPK(player, state)
 			return
 		end
 	end
 
-	-- Set target (server auto-attacks with weapon) + cast spell
-	if player:getTarget() ~= target then
-		player:setTarget(target)
+	local target = Creature(state.pkTarget)
+	if not target or target:isRemoved() or target:getHealth() <= 0 then
+		-- Target gone/dead: exit PK silenciosamente
+		BotSystem.exitPK(player, state)
+		return
 	end
-	BotSystem.doCastSpell(player, state, target)
-	BotSystem.chaseTarget(player, state, target)  -- chaseTarget handles z-pursuit
+
+	local tpos = target:getPosition()
+
+	-- PZ safety: stop attacking if target reached protection zone
+	local tTile = Tile(tpos)
+	if tTile and tTile:hasFlag(TILESTATE_PROTECTIONZONE) then
+		-- Se o rival correu para PZ em disputa de cave: fuga da batalha!
+		-- O bot que permaneceu na cave vence imediatamente e reivindica o spawn!
+		if inDisputeFight and disputeSession then
+			for _, part in ipairs(disputeSession.participants or {}) do
+				if part.guid ~= player:getGuid() then
+					part.fledToPz = true
+					break
+				end
+			end
+			BotDispute.resolve(disputeSession, "FIGHT", player:getGuid())
+			return
+		end
+
+		BotSystem.exitPK(player, state)
+		return
+	end
+
+	-- Ensure white skull while attacking in PK (safe: bot is not in PZ)
+	if player:getSkull() ~= SKULL_WHITE and player:getSkull() < SKULL_WHITE then
+		pcall(function() player:setSkull(SKULL_WHITE) end)
+	end
+
+	-- Leash distance check (same z only — allow z-pursuit through stairs)
+	if pos.z == tpos.z then
+		local dist = math.max(math.abs(pos.x - tpos.x), math.abs(pos.y - tpos.y))
+		if dist > 18 then
+			-- Rival fugiu para longe da cave! Vitória por deserção!
+			if inDisputeFight and disputeSession then
+				for _, part in ipairs(disputeSession.participants or {}) do
+					if part.guid ~= player:getGuid() then
+						part.fledToPz = true
+						break
+					end
+				end
+				BotDispute.resolve(disputeSession, "FIGHT", player:getGuid())
+				return
+			end
+			BotSystem.exitPK(player, state)
+			return
+		end
+	end
+
+	-- Alvo prioritário é o player rival. Só ataca monstros se estiver trapado/bloqueado!
+	if not state.attackingBlocker then
+		if player:getTarget() ~= target then
+			player:setTarget(target)
+		end
+		BotSystem.doCastSpell(player, state, target)
+	end
+	BotSystem.chaseTarget(player, state, target)  -- chaseTarget handles z-pursuit & attacks blocker only if trapped
 	BotSystem.doHealing(player, state)
 end
 
@@ -7970,14 +8852,25 @@ function BotSystem.exitPK(player, state)
 	player:setTarget(nil)
 	player:setFollowCreature(nil)
 
-	-- Check if anyone is still attacking us — if so, enter COMBAT instead of IDLE
-	-- This prevents the "ignore weak attacker" roll from immediately disengaging
 	local pos = player:getPosition()
+	local myTile = Tile(pos)
+
+	-- If bot itself is in PZ, do NOT re-enter COMBAT under any circumstances
+	if myTile and myTile:hasFlag(TILESTATE_PROTECTIONZONE) then
+		state.state = BOT_STATE.IDLE
+		state.idleStartTime = os.time()
+		return
+	end
+
+	-- Check if anyone is still attacking us — if so, enter COMBAT instead of IDLE
+	-- This prevents the "ignore weak attacker" roll from immediately disengaging.
+	-- Skip oldTarget so we do not instantly re-engage the PK target we just left.
 	local spectators = Game.getSpectators(pos, false, false, 7, 7, 5, 5)
 	local nearbyAttacker = nil
 	if spectators then
 		for _, creature in ipairs(spectators) do
 			if creature ~= player and not creature:isRemoved() and creature:getHealth() > 0
+				and creature:getId() ~= oldTarget
 				and Player(creature:getId()) then
 				local target = creature:getTarget()
 				if target and target:getId() == player:getId() then
@@ -8157,69 +9050,106 @@ end
 -- Spell Learning & Selection
 -- ============================================================================
 
--- Learn all attack + heal spells appropriate for bot's vocation
+-- In-memory cache to prevent repetitive spell learning & db operations
+BotSystem.learnedSpellsCache = BotSystem.learnedSpellsCache or {}
+
+-- Learn all attack + heal spells appropriate for bot's vocation (cached)
 function BotSystem.learnAllSpells(player)
+	if not player or player:isRemoved() then return end
+	local guid = player:getGuid()
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
-	local count = 0
+
+	-- Fast path: if this bot already learned all spells for this vocation, skip completely
+	if BotSystem.learnedSpellsCache[guid] == baseVoc then
+		return
+	end
+
+	local newlyLearned = 0
+	local function tryLearn(spellName)
+		if not player:hasLearnedSpell(spellName) then
+			player:learnSpell(spellName)
+			newlyLearned = newlyLearned + 1
+		end
+	end
 
 	local atkSpells = BOT_SPELLS[baseVoc]
 	if atkSpells then
 		for _, spell in ipairs(atkSpells) do
-			player:learnSpell(spell.name)
-			count = count + 1
+			tryLearn(spell.name)
 		end
 	end
 
 	local healSpells = BOT_HEAL_SPELLS[baseVoc]
 	if healSpells then
 		for _, spell in ipairs(healSpells) do
-			player:learnSpell(spell.name)
-			count = count + 1
+			tryLearn(spell.name)
 		end
 	end
 
 	local hasteSpells = BOT_HASTE_SPELLS and BOT_HASTE_SPELLS[baseVoc]
 	if hasteSpells then
 		for _, spell in ipairs(hasteSpells) do
-			player:learnSpell(spell.name)
-			count = count + 1
+			tryLearn(spell.name)
 		end
 	end
 
 	-- Universal spells
 	local universalSpells = {"exura", "exura gran", "exura vita", "utani hur", "utani gran hur", "exana pox"}
 	for _, name in ipairs(universalSpells) do
-		player:learnSpell(name)
-		count = count + 1
+		tryLearn(name)
 	end
 
 	-- Vocation-specific support spells
 	if baseVoc == 1 then -- Sorcerer
-		player:learnSpell("utamo vita")
-		player:learnSpell("exana vita")
-		count = count + 2
+		tryLearn("utamo vita")
+		tryLearn("exana vita")
 	elseif baseVoc == 2 then -- Druid
-		player:learnSpell("exura sio")
-		player:learnSpell("exura gran mas res")
-		player:learnSpell("utamo vita")
-		player:learnSpell("exana vita")
-		count = count + 4
+		tryLearn("exura sio")
+		tryLearn("exura gran mas res")
+		tryLearn("utamo vita")
+		tryLearn("exana vita")
 	elseif baseVoc == 3 then -- Paladin
-		player:learnSpell("exura san")
-		player:learnSpell("exura gran san")
-		player:learnSpell("utito tempo san")
-		count = count + 3
+		tryLearn("exura san")
+		tryLearn("exura gran san")
+		tryLearn("utito tempo san")
 	elseif baseVoc == 4 then -- Knight
-		player:learnSpell("exura ico")
-		player:learnSpell("exura med ico")
-		player:learnSpell("utito tempo")
-		player:learnSpell("exeta res")
-		player:learnSpell("utani tempo hur")
-		count = count + 5
+		tryLearn("exura ico")
+		tryLearn("exura med ico")
+		tryLearn("utito tempo")
+		tryLearn("exeta res")
+		tryLearn("utani tempo hur")
 	end
 
-	logger.info("[Bot] " .. player:getName() .. " learned " .. count .. " spells (voc=" .. baseVoc .. ")")
+	-- Learn all available spells from TibiaData database up to character's current level
+	if BOT_TIBIADATA_SPELLS and BOT_TIBIADATA_SPELLS[baseVoc] then
+		local curLevel = player:getLevel()
+		for _, sp in ipairs(BOT_TIBIADATA_SPELLS[baseVoc]) do
+			if not sp.isRune and curLevel >= (sp.level or 0) then
+				if sp.formula and #sp.formula > 0 then
+					tryLearn(sp.formula)
+				end
+				if sp.name and #sp.name > 0 then
+					tryLearn(sp.name)
+				end
+			end
+		end
+	end
+
+	-- Ensure bot account maintains 365 days of active premium
+	local accId = player.getAccountId and player:getAccountId()
+	if accId and accId > 0 then
+		pcall(function()
+			db.asyncQuery(string.format("UPDATE `accounts` SET `premdays` = 365 WHERE `id` = %d AND `premdays` < 30", accId))
+		end)
+	end
+
+	BotSystem.learnedSpellsCache[guid] = baseVoc
+
+	if newlyLearned > 0 then
+		logger.info("[Bot] " .. player:getName() .. " learned " .. newlyLearned .. " new spells (voc=" .. baseVoc .. ")")
+		pcall(function() player:save() end)
+	end
 end
 
 -- Throwing weapon & ammunition item IDs that need stacking (paladin ammo/weapons)
@@ -8252,6 +9182,313 @@ local FALLBACK_STARTER_LOADOUTS = {
 	[4] = { slot_head = 3351, slot_armor = 3357, slot_legs = 3557, slot_feet = 3552, slot_right = 3271, slot_left = 3425, slot_ammo = 0 }, -- Knight: Spike Sword + Plate Set + Dwarven Shield
 }
 
+-- Calcula a contagem de slots livres nas mochilas principais e aninhadas
+function BotSystem.getFreeBackpackSlots(player)
+	if not player or player:isRemoved() then return 0 end
+	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+	if not bp or not bp:isContainer() then return 0 end
+
+	local freeSlots = 0
+	local function countContainer(container)
+		if not container or not container:isContainer() then return end
+		local cap = container:getCapacity() or 20
+		local size = container:getSize() or 0
+		freeSlots = freeSlots + math.max(0, cap - size)
+		local items = container:getItems(false)
+		if items then
+			for _, item in ipairs(items) do
+				if item:isContainer() then
+					countContainer(item)
+				end
+			end
+		end
+	end
+
+	countContainer(bp)
+	return freeSlots
+end
+
+--- Adiciona item com segurança de capacidade e distribuição em mochilas aninhadas
+function BotSystem.addItemToBackpack(player, itemId, count)
+	if not player or player:isRemoved() then return nil end
+	count = count or 1
+	if count <= 0 then return nil end
+
+	-- Garante capacidade suficiente para suprimentos não caírem no chão
+	if player:getFreeCapacity() < 2500 then
+		player:setCapacity(player:getCapacity() + 100000)
+	end
+
+	local itemType = ItemType(itemId)
+	local isStackable = itemType and itemType:isStackable()
+
+	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+	if not bp or not bp:isContainer() then
+		bp = player:addItem(2854, 1, false, CONST_SLOT_BACKPACK)
+	end
+
+	local function findFreeContainer(c)
+		if not c or not c:isContainer() then return nil end
+		if c:getSize() < c:getCapacity() then
+			return c
+		end
+		local items = c:getItems(false)
+		if items then
+			for _, sub in ipairs(items) do
+				if sub:isContainer() then
+					local found = findFreeContainer(sub)
+					if found then return found end
+				end
+			end
+		end
+		return nil
+	end
+
+	if isStackable then
+		local it = nil
+		pcall(function() it = player:addItem(itemId, count, false) end)
+		if it then return it end
+
+		local targetCont = findFreeContainer(bp)
+		if targetCont then
+			pcall(function() it = targetCont:addItem(itemId, count) end)
+		end
+		return it
+	else
+		-- Não-empilhável (ex: runas com cargas, equips): distribui uma a uma nas backpacks
+		local lastItem = nil
+		for _ = 1, count do
+			local added = nil
+			pcall(function() added = player:addItem(itemId, 1, false) end)
+			if not added then
+				local targetCont = findFreeContainer(bp)
+				if targetCont then
+					pcall(function() added = targetCont:addItem(itemId, 1) end)
+				end
+			end
+			if added then lastItem = added end
+		end
+		return lastItem
+	end
+end
+
+-- Calcula o número de mochilas aninhadas proporcional à capacidade do personagem
+function BotSystem.getDesiredNestedBackpacks(player)
+	if not player or player:isRemoved() then return 1 end
+	-- player:getCapacity() retorna capacidade em 1/100 oz (ex: 470 oz = 47000)
+	local totalCapOz = (player:getCapacity() or 40000) / 100
+
+	-- Escalonamento proporcional à capacidade:
+	-- Cap < 600 oz (Mages lvl 8-25, Knights lvl 8-15): 1 mochila aninhada (18 oz)
+	-- Cap 600-1199 oz: 2 mochilas aninhadas (36 oz)
+	-- Cap 1200-1999 oz: 3 mochilas aninhadas (54 oz)
+	-- Cap 2000-3499 oz: 4 mochilas aninhadas (72 oz)
+	-- Cap 3500-4999 oz: 5 mochilas aninhadas (90 oz)
+	-- Cap >= 5000 oz: 6 mochilas aninhadas (108 oz)
+	if totalCapOz >= 5000 then
+		return 6
+	elseif totalCapOz >= 3500 then
+		return 5
+	elseif totalCapOz >= 2000 then
+		return 4
+	elseif totalCapOz >= 1200 then
+		return 3
+	elseif totalCapOz >= 600 then
+		return 2
+	else
+		return 1
+	end
+end
+
+-- Sincroniza a quantidade de mochilas aninhadas com o valor proporcional à capacidade
+function BotSystem.syncNestedBackpacks(player, bp)
+	if not player or not bp or not bp:isContainer() then return end
+	local targetCount = BotSystem.getDesiredNestedBackpacks(player)
+
+	local nestedContainers = {}
+	local bpItems = bp:getItems(false)
+	if bpItems then
+		for _, it in ipairs(bpItems) do
+			if it:isContainer() then
+				table.insert(nestedContainers, it)
+			end
+		end
+	end
+
+	local currentCount = #nestedContainers
+	local freeCap = player:getFreeCapacity()
+
+	-- 1. Se tem menos mochilas que o alvo, adiciona novas se houver capacidade (mínimo 18.00 oz = 1800)
+	if currentCount < targetCount and bp:getSize() < bp:getCapacity() and freeCap >= 1800 then
+		for _ = currentCount + 1, targetCount do
+			if bp:getSize() < bp:getCapacity() and player:getFreeCapacity() >= 1800 then
+				pcall(function() bp:addItem(2854, 1) end)
+			else
+				break
+			end
+		end
+	-- 2. Se tem mais mochilas que o alvo proporcional, remove com segurança apenas as EXCEDENTES que estiverem VAZIAS
+	elseif currentCount > targetCount then
+		for i = currentCount, targetCount + 1, -1 do
+			local container = nestedContainers[i]
+			if container and container:isContainer() and container:getSize() == 0 then
+				pcall(function() container:remove() end)
+			end
+		end
+	end
+end
+
+-- Descarte de itens irrelevantes/lixo no chão quando a cap estiver cheia/baixa (< 30.00 oz)
+function BotSystem.dropIrrelevantItems(player)
+	if not player or player:isRemoved() then return end
+	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+	if not bp or not bp:isContainer() then return end
+
+	local protectedItemIds = {
+		[3003] = true, [3457] = true, [3456] = true, [3308] = true, [5710] = true, -- tools
+		[268] = true, [266] = true, [315] = true, [316] = true, [317] = true, [318] = true, [7642] = true, [7643] = true, -- potions
+		[3725] = true, [3582] = true, [3577] = true, -- food
+		[3155] = true, [3191] = true, [3161] = true, [3175] = true, [3160] = true, [3152] = true, [3178] = true, [3198] = true, [3189] = true, -- runes
+		[3447] = true, [7364] = true, [7365] = true, [15793] = true, [3277] = true, [7378] = true, [14251] = true, [7368] = true, -- paladin ammo/spears
+		[2854] = true, [2853] = true, [35848] = true, [35562] = true -- backpacks and quivers
+	}
+
+	local pos = player:getPosition()
+	local allItems = bp:getItems(true)
+	if not allItems then return end
+
+	local dropped = 0
+	for _, item in ipairs(allItems) do
+		local id = item:getId()
+		if not protectedItemIds[id] and not item:isContainer() then
+			local unitPrice = 0
+			local res = db.storeQuery(string.format("SELECT buy_offer, day_avg_sell, npc_buy FROM tibia_market_items WHERE item_id = %d LIMIT 1", id))
+			if res then
+				local bOff = Result.getNumber(res, "buy_offer")
+				local dAvg = Result.getNumber(res, "day_avg_sell")
+				local npcB = Result.getNumber(res, "npc_buy")
+				Result.free(res)
+				unitPrice = (bOff > 0 and bOff) or (dAvg > 0 and dAvg) or (npcB > 0 and npcB) or 0
+			end
+
+			-- Se o valor unitário for menor que 30 gp (lixo/inútil), descarta no chão
+			if unitPrice < 30 then
+				local itCount = item:getCount() or 1
+				local itName = item:getName() or ("item#" .. id)
+				local tile = Tile(pos)
+				if tile then
+					item:moveTo(pos)
+				else
+					item:remove()
+				end
+				dropped = dropped + 1
+				logger.info(string.format("[Bot:%s] [CAP-CLEANER] Cap cheia/baixa: descartou no chão %dx %s (val: %d gp)!",
+					player:getName(), itCount, itName, unitPrice))
+			end
+		end
+	end
+end
+
+-- Inspeção frequente anti-nudez: garante que o bot nunca fique 'pelado'
+function BotSystem.checkEquipmentCompleteness(player, state)
+	if not player or player:isRemoved() then return end
+	-- Pots/suprimentos NAO pesam na cap dos bots: piso de capacidade generoso
+	-- (2000000 = 20000 oz) para que levem o maximo de pots sem encher a cap.
+	pcall(function() if (player:getCapacity() or 0) < 2000000 then player:setCapacity(2000000) end end)
+	local curLevel = player:getLevel()
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	local personality = state and state.personality or 2
+	local bracket = BotEquipmentData.getBracketForLevel and BotEquipmentData.getBracketForLevel(curLevel) or 8
+	local vocStr = (baseVoc == 1 and "sorcerer") or (baseVoc == 2 and "druid") or (baseVoc == 3 and "paladin") or "knight"
+
+	-- 1. Garante mochila equipada com mochilas aninhadas proporcionais à cap
+	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+	if not bp then
+		local newBp = nil
+		pcall(function() newBp = player:addItem(2854, 1, false, CONST_SLOT_BACKPACK) end)
+		if newBp and newBp:isContainer() then
+			BotSystem.syncNestedBackpacks(player, newBp)
+		end
+		logger.info(string.format("[Bot:%s] [ANTI-PELADO] Sem mochila! Equipou backpack principal com BPs proporcionais à cap.", player:getName()))
+	else
+		BotSystem.syncNestedBackpacks(player, bp)
+	end
+
+	-- 2. Garante ferramentas de exploração essenciais (machete 3308, corda 3003, pá 3457)
+	pcall(function()
+		if not player:getItemCount(3308) or player:getItemCount(3308) == 0 then
+			player:addItem(3308, 1, false)
+		end
+		if not player:getItemCount(3003) or player:getItemCount(3003) == 0 then
+			player:addItem(3003, 1, false)
+		end
+		if not player:getItemCount(3457) or player:getItemCount(3457) == 0 then
+			player:addItem(3457, 1, false)
+		end
+	end)
+
+	-- 3. Checa slots corporais essenciais e adquire/equipa qualquer item faltante
+	local slots = {
+		{ name = "head",  slot = CONST_SLOT_HEAD },
+		{ name = "armor", slot = CONST_SLOT_ARMOR },
+		{ name = "legs",  slot = CONST_SLOT_LEGS },
+		{ name = "feet",  slot = CONST_SLOT_FEET },
+		{ name = "right", slot = CONST_SLOT_LEFT },  -- weapon
+		{ name = "left",  slot = CONST_SLOT_RIGHT }, -- shield
+	}
+	if baseVoc == 3 then
+		table.insert(slots, { name = "ammo", slot = CONST_SLOT_AMMO })
+	end
+
+	for _, s in ipairs(slots) do
+		local curItem = player:getSlotItem(s.slot)
+		if not curItem then
+			local opt = nil
+			if s.name == "right" and baseVoc == 4 then
+				local loadout = BotEquipmentData.getLoadout(curLevel, baseVoc, personality, player)
+				opt = { item_id = loadout.slot_right, name = "knight weapon", price = 100 }
+			else
+				opt = BotEquipmentData.getOptionForSlot and BotEquipmentData.getOptionForSlot(bracket, vocStr, s.name, personality)
+			end
+			if opt and opt.item_id and opt.item_id > 0 then
+				local price = tonumber(opt.price) or 100
+				-- Compra deduzindo do banco ou inventário do bot se tiver gold
+				local bal = player:getBankBalance()
+				if bal >= price then
+					player:setBankBalance(bal - price)
+				elseif player:getMoney() >= price then
+					player:removeMoney(price)
+				end
+				local count = (s.slot == CONST_SLOT_AMMO and 100) or 1
+				local ok = player:setSlotItem(s.slot, opt.item_id, count)
+				if ok then
+					logger.info(string.format("[Bot:%s] [ANTI-PELADO] Slot %s estava vazio! Comprou e equipou %s (id %d)!",
+						player:getName(), s.name, opt.name or "item", opt.item_id))
+				end
+			end
+		end
+	end
+
+	-- Limpa armas redundantes de outras classes que sobraram do starter pack para Knight
+	if baseVoc == 4 and bp and bp:isContainer() then
+		local curWeapon = player:getSlotItem(CONST_SLOT_LEFT)
+		local curWeaponId = curWeapon and curWeapon:getId() or 0
+		local starterWeapons = { [7773] = true, [7774] = true, [3327] = true }
+		if starterWeapons[curWeaponId] then
+			local allItems = bp:getItems(true)
+			if allItems then
+				for _, it in ipairs(allItems) do
+					local itId = it:getId()
+					if starterWeapons[itId] and itId ~= curWeaponId then
+						pcall(function() it:remove() end)
+					end
+				end
+			end
+		end
+	end
+end
+
 -- Equip bot with best gear for their level and vocation.
 -- Efficient: skips slots where the correct item is already equipped.
 function BotSystem.equipBot(player)
@@ -8259,9 +9496,16 @@ function BotSystem.equipBot(player)
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
 
-	-- Ensure bot always has a backpack equipped for loot
-	if CONST_SLOT_BACKPACK and not player:getSlotItem(CONST_SLOT_BACKPACK) then
-		pcall(function() player:setSlotItem(CONST_SLOT_BACKPACK, 2854, 1) end)
+	-- Ensure bot always has a backpack equipped with nested backpacks for loot storage (proportional to cap)
+	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+	if not bp then
+		local newBp = nil
+		pcall(function() newBp = player:addItem(2854, 1, false, CONST_SLOT_BACKPACK) end)
+		if newBp and newBp:isContainer() then
+			BotSystem.syncNestedBackpacks(player, newBp)
+		end
+	else
+		BotSystem.syncNestedBackpacks(player, bp)
 	end
 
 	-- Ensure bot always carries essential exploration tools: machete (3308), rope (3003), shovel (3457)
@@ -8280,7 +9524,7 @@ function BotSystem.equipBot(player)
 	local guid = player:getGuid()
 	local state = BotState and BotState[guid]
 	local personality = state and state.personality or ((guid % 5) + 1)
-	local loadout = BotEquipmentData and BotEquipmentData.getLoadout and BotEquipmentData.getLoadout(level, baseVoc, personality)
+	local loadout = BotEquipmentData and BotEquipmentData.getLoadout and BotEquipmentData.getLoadout(level, baseVoc, personality, player)
 	if not loadout then
 		loadout = FALLBACK_STARTER_LOADOUTS[baseVoc] or FALLBACK_STARTER_LOADOUTS[4]
 	end
@@ -8341,7 +9585,8 @@ function BotSystem.equipBot(player)
 			.. " (lv=" .. level .. " voc=" .. baseVoc .. ")")
 	end
 
-	-- Run immediate upkeep for ammo / food
+	-- Run immediate upkeep for ammo / food and gear completeness
+	BotSystem.checkEquipmentCompleteness(player, state)
 	if state then
 		BotSystem.checkPaladinAmmo(player, state)
 		BotSystem.checkBotFoodAndRegen(player, state)
@@ -8452,24 +9697,25 @@ function BotSystem.checkPaladinAmmo(player, state)
 	end
 end
 
--- Food supply & auto-eat for all bot vocations:
--- Ensures bots maintain active HP/Mana regeneration without dropping items on the floor.
+-- Food supply & auto-eat com consumo de itens fisicos da mochila
 function BotSystem.checkBotFoodAndRegen(player, state)
 	local cond = player:getCondition(CONDITION_REGENERATION, CONDITIONID_DEFAULT)
 	local regenTicks = cond and cond:getTicks() or 0
 
-	-- If regeneration is missing or expiring in less than 60 seconds, feed for 20 minutes (1200s)
+	-- Regen base por level/vocacao SEM depender de comer food: os bots nao
+	-- precisam carregar nem consumir comida; o piso de regen (HP+mana) e sempre
+	-- garantido pelo feed direto. A recuperacao RAPIDA em hunt continua vindo
+	-- exclusivamente das pots fisicas (checkBotPotions) -> pots finitas, refil por level/banco.
 	if regenTicks < 60000 then
 		player:feed(1200)
-		BotSystem.debugLog(state, "Food regen refreshed (ticks=" .. regenTicks .. " -> 1200s)")
+		BotSystem.debugLog(state, "Regen base refrescado sem food (-> 1200s)")
 	end
 end
 
 -- Backward compatibility alias
 BotSystem.checkMageFoodAndRegen = BotSystem.checkBotFoodAndRegen
 
--- Simulated Potion Recovery (Exclusively for Bots):
--- Saves backpack capacity and slots while accurately simulating potion recovery per vocation & level tier.
+-- Potion Recovery com consumo de itens fisicos da mochila
 function BotSystem.checkBotPotions(player, state)
 	local now = os.time()
 	if state.lastPotionTime and (now - state.lastPotionTime) < 1 then return end
@@ -8483,42 +9729,68 @@ function BotSystem.checkBotPotions(player, state)
 	local maxMana = player:getMaxMana()
 	local used = false
 
+	local function tryConsumePotion(potIds)
+		for _, pid in ipairs(potIds) do
+			if player:getItemCount(pid) > 0 then
+				player:removeItem(pid, 1)
+				return true, pid
+			end
+		end
+		return false, 0
+	end
+
 	-- 1. Emergency Health Potion for Knights (hp < 50%)
 	if baseVoc == 4 and (hp / math.max(maxHp, 1)) < 0.5 then
-		local healAmount = (level >= 200 and math.random(850, 1150))
-			or (level >= 130 and math.random(750, 950))
-			or (level >= 80 and math.random(450, 650))
-			or (level >= 50 and math.random(280, 360))
-			or math.random(150, 220)
-		player:addHealth(healAmount)
-		used = true
+		local hpPots = { 7643, 316, 315, 266 }
+		local hasPot, potId = tryConsumePotion(hpPots)
+		if hasPot then
+			local healAmount = (potId == 7643 and math.random(850, 1150))
+				or (potId == 316 and math.random(750, 950))
+				or (potId == 315 and math.random(450, 650))
+				or math.random(150, 220)
+			player:addHealth(healAmount)
+			used = true
+		end
 	end
 
 	-- 2. Mana Potion Recovery for all vocations (mana < 60%)
 	if not used and (mana / math.max(maxMana, 1)) < 0.6 then
 		if baseVoc == 1 or baseVoc == 2 then -- Sorcerer / Druid
-			local manaAmount = (level >= 130 and math.random(420, 580))
-				or (level >= 80 and math.random(170, 230))
-				or (level >= 50 and math.random(130, 170))
-				or math.random(80, 120)
-			player:addMana(manaAmount)
-			used = true
-		elseif baseVoc == 3 then -- Paladin (Mana / Spirit potions)
-			if level >= 130 then
-				player:addHealth(400)
-				player:addMana(250)
-			elseif level >= 80 then
-				player:addHealth(300)
-				player:addMana(150)
-			elseif level >= 50 then
-				player:addMana(math.random(130, 170))
-			else
-				player:addMana(math.random(80, 120))
+			local mpPots = { 23373, 318, 317, 268 }
+			local hasPot, potId = tryConsumePotion(mpPots)
+			if hasPot then
+				local manaAmount = (potId == 23373 and math.random(600, 800))
+					or (potId == 318 and math.random(420, 580))
+					or (potId == 317 and math.random(170, 230))
+					or math.random(80, 120)
+				player:addMana(manaAmount)
+				used = true
 			end
-			used = true
+		elseif baseVoc == 3 then -- Paladin (Mana / Spirit potions)
+			local spiritPots = { 7642, 315, 266 }
+			local mpPots = { 317, 268 }
+			if (hp / math.max(maxHp, 1)) < 0.6 then
+				local hasPot, potId = tryConsumePotion(spiritPots)
+				if hasPot then
+					player:addHealth(350)
+					player:addMana(200)
+					used = true
+				end
+			end
+			if not used then
+				local hasPot, potId = tryConsumePotion(mpPots)
+				if hasPot then
+					player:addMana(potId == 317 and math.random(130, 170) or math.random(80, 120))
+					used = true
+				end
+			end
 		elseif baseVoc == 4 then -- Knight
-			player:addMana(math.random(80, 120))
-			used = true
+			local mpPots = { 268 }
+			local hasPot, potId = tryConsumePotion(mpPots)
+			if hasPot then
+				player:addMana(math.random(80, 120))
+				used = true
+			end
 		end
 	end
 
@@ -8599,7 +9871,7 @@ function BotSystem.checkPartySio(player, state)
 	return true
 end
 
--- Select best available attack spell for the given target (AoE vs Single-target aware)
+-- Select best available attack spell for the given target (Weakness & Combo aware)
 function BotSystem.selectAttackSpell(player, state, target)
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
@@ -8612,17 +9884,19 @@ function BotSystem.selectAttackSpell(player, state, target)
 	local dist = math.max(math.abs(pos.x - tpos.x), math.abs(pos.y - tpos.y))
 	local now = os.time()
 
-	-- Determine if target is a player (for PvP-only spells like SD rune)
+	-- Determine if target is a player
 	local targetIsPlayer = Player(target:getId()) ~= nil
 	local targetIsStrongMonster = false
+	local elementMap = nil
+
 	if not targetIsPlayer then
 		local mon = Monster(target:getId())
 		if mon then
+			local mtype = mon:getType()
+			elementMap = mtype and mtype:getElementList() or nil
 			local monHp = mon:getMaxHealth()
-			local botHp = Player(player:getId()) and player:getMaxHealth() or 1
+			local botHp = player:getMaxHealth() or 1
 			if monHp >= botHp * 5 then
-				local mtype = mon:getType()
-				local elementMap = mtype and mtype:getElementList() or nil
 				local deathAbsorb = elementMap and elementMap[COMBAT_DEATHDAMAGE] or 0
 				if deathAbsorb < 100 then
 					targetIsStrongMonster = true
@@ -8634,9 +9908,11 @@ function BotSystem.selectAttackSpell(player, state, target)
 	-- Count nearby monsters to decide between AoE and Single-Target
 	local monstersAround = 0
 	local spectators = Game.getSpectators(pos, false, false, 2, 2, 2, 2)
-	for _, spec in ipairs(spectators) do
-		if spec:isMonster() and spec:getHealth() > 0 then
-			monstersAround = monstersAround + 1
+	if spectators then
+		for _, spec in ipairs(spectators) do
+			if spec:isMonster() and spec:getHealth() > 0 then
+				monstersAround = monstersAround + 1
+			end
 		end
 	end
 	local useAoE = monstersAround >= 2
@@ -8671,38 +9947,101 @@ function BotSystem.selectAttackSpell(player, state, target)
 		end
 	end
 
-	-- Filter spells preferring AoE when 2+ monsters, or single-target strikes when 1 monster
-	local available = {}
-	for i = 1, #spells do
-		local spell = spells[i]
-		if level >= spell.level then
-			if spell.pvpOnly and not targetIsPlayer and not targetIsStrongMonster then
-				-- skip
-			else
+	-- If AoE situation: Prioritize high-impact Class AoE spells or Area Runes
+	if useAoE then
+		-- 1. Class AoE spells off cooldown
+		local aoeCandidates = {}
+		for i = 1, #spells do
+			local spell = spells[i]
+			if spell.isAoE and level >= spell.level then
 				local cdKey = "spellCd_" .. spell.name
 				if not state[cdKey] or now >= state[cdKey] then
 					if spell.range == 0 or dist <= spell.range then
-						if useAoE and spell.isAoE then
-							table.insert(available, spell)
-						elseif not useAoE and not spell.isAoE then
-							table.insert(available, spell)
+						local resist = (elementMap and spell.combatType and elementMap[spell.combatType]) or 0
+						if resist < 100 then
+							local eff = (spell.baseDmg or 30) * math.max(0, (100 - resist) / 100.0)
+							table.insert(aoeCandidates, {spell = spell, eff = eff})
 						end
 					end
 				end
 			end
 		end
+
+		if #aoeCandidates > 0 then
+			table.sort(aoeCandidates, function(a, b) return a.eff > b.eff end)
+			return aoeCandidates[1].spell
+		end
+
+		-- 2. Area Runes in backpack (GFB, Avalanche, Stone Shower, Thunderstorm)
+		local areaRunes = {
+			{runeId = 3191, name = "adori mas flam", combatType = COMBAT_FIREDAMAGE,   effect = CONST_ME_FIREAREA,     baseDmg = 45},
+			{runeId = 3161, name = "adori mas frigo", combatType = COMBAT_ICEDAMAGE,   effect = CONST_ME_ICEAREA,      baseDmg = 45},
+			{runeId = 3175, name = "adori mas tera",  combatType = COMBAT_EARTHDAMAGE, effect = CONST_ME_CARNIPHILA,   baseDmg = 40},
+			{runeId = 3202, name = "adori mas vis",   combatType = COMBAT_ENERGYDAMAGE, effect = CONST_ME_ENERGYAREA,  baseDmg = 40},
+		}
+
+		local bestRune = nil
+		local bestRuneEff = -1
+		for _, ar in ipairs(areaRunes) do
+			if player:getItemCount(ar.runeId) > 0 then
+				local cdKey = "spellCd_" .. ar.name
+				if not state[cdKey] or now >= state[cdKey] then
+					local resist = (elementMap and elementMap[ar.combatType]) or 0
+					if resist < 100 then
+						local eff = ar.baseDmg * math.max(0, (100 - resist) / 100.0)
+						if eff > bestRuneEff then
+							bestRuneEff = eff
+							bestRune = {
+								name = ar.name,
+								combatType = ar.combatType,
+								range = 5,
+								effect = ar.effect,
+								cd = 2,
+								baseDmg = ar.baseDmg,
+								isRune = true,
+								isAoE = true,
+								level = 28
+							}
+						end
+					end
+				end
+			end
+		end
+
+		if bestRune then
+			return bestRune
+		end
 	end
 
-	-- Fallback if preferred group has no off-cooldown spell
-	if #available == 0 then
-		for i = 1, #spells do
-			local spell = spells[i]
-			if level >= spell.level then
-				if not (spell.pvpOnly and not targetIsPlayer and not targetIsStrongMonster) then
+	-- Single-Target (or AoE fallback): Pick the STRONGEST spell against target's elemental weaknesses!
+	local singleCandidates = {}
+	for i = 1, #spells do
+		local spell = spells[i]
+		if not spell.isAoE and level >= spell.level then
+			if not (spell.pvpOnly and not targetIsPlayer and not targetIsStrongMonster) then
+				local canCastRune = true
+				if spell.isRune then
+					local runeId = 3155
+					if spell.name:find("flam") or spell.name:find("fireball") then runeId = 3191
+					elseif spell.name:find("frigo") or spell.name:find("avalanche") then runeId = 3161
+					elseif spell.name:find("tera") or spell.name:find("stone") then runeId = 3175
+					elseif spell.name:find("vis") or spell.name:find("thunder") then runeId = 3202
+					end
+					if player:getItemCount(runeId) == 0 then
+						canCastRune = false
+					end
+				end
+
+				if canCastRune then
 					local cdKey = "spellCd_" .. spell.name
 					if not state[cdKey] or now >= state[cdKey] then
 						if spell.range == 0 or dist <= spell.range then
-							table.insert(available, spell)
+							local resist = (elementMap and spell.combatType and elementMap[spell.combatType]) or 0
+							if resist < 100 then -- Exclude immunities!
+								local mult = math.max(0, (100 - resist) / 100.0)
+								local eff = (spell.baseDmg or 20) * mult
+								table.insert(singleCandidates, {spell = spell, eff = eff})
+							end
 						end
 					end
 				end
@@ -8710,8 +10049,25 @@ function BotSystem.selectAttackSpell(player, state, target)
 		end
 	end
 
-	if #available == 0 then return nil end
-	return available[math.random(#available)]
+	if #singleCandidates > 0 then
+		table.sort(singleCandidates, function(a, b) return a.eff > b.eff end)
+		return singleCandidates[1].spell
+	end
+
+	-- Ultimate fallback: any spell off cooldown in range
+	for i = 1, #spells do
+		local spell = spells[i]
+		if level >= spell.level then
+			local cdKey = "spellCd_" .. spell.name
+			if not state[cdKey] or now >= state[cdKey] then
+				if spell.range == 0 or dist <= spell.range then
+					return spell
+				end
+			end
+		end
+	end
+
+	return nil
 end
 
 -- ============================================================================
@@ -8722,6 +10078,43 @@ end
 -- Weapon auto-attacks are handled by the server via setAttackedCreature.
 -- This function only handles spell casting: select a random available spell and cast it.
 -- The spell system uses getAttackedCreature() for targeting automatically.
+-- ============================================================================
+-- Custo de mana das spells: bots pagam mana DE VERDADE (senao as pots nao
+-- importam). O cast do bot aplica o efeito direto (castSpell/addHealth) e so
+-- "diz" as palavras, sem passar pelo pipeline que cobra mana; entao deduzimos
+-- aqui. Custo real via Spell():mana(), com fallback p/ nomes conhecidos.
+-- Runas NAO custam mana (so o item). Custo desconhecido nao bloqueia (fail-open).
+-- ============================================================================
+BotSystem._spellMana = BotSystem._spellMana or {}
+local SPELL_MANA_FALLBACK = {
+	["exura"] = 20, ["exura gran"] = 70, ["exura vita"] = 160,
+	["exura san"] = 85, ["exura gran san"] = 210,
+	["exura ico"] = 40, ["exura infir ico"] = 20, ["exura med ico"] = 200,
+	["utamo vita"] = 50, ["utito tempo"] = 60,
+	["utani hur"] = 60, ["utani gran hur"] = 100, ["utani tempo hur"] = 100,
+}
+function BotSystem.getSpellMana(name)
+	if not name then return 0 end
+	local cached = BotSystem._spellMana[name]
+	if cached ~= nil then return cached end
+	local cost = 0
+	pcall(function()
+		local s = Spell(name)
+		if s then cost = tonumber(s:mana()) or 0 end
+	end)
+	if cost == 0 then cost = SPELL_MANA_FALLBACK[name] or 0 end
+	BotSystem._spellMana[name] = cost
+	return cost
+end
+-- true = tinha mana e gastou (ou custo desconhecido/0); false = sem mana (nao casta).
+function BotSystem.trySpendSpellMana(player, name)
+	local cost = BotSystem.getSpellMana(name)
+	if cost <= 0 then return true end
+	if player:getMana() < cost then return false end
+	player:addMana(-cost)
+	return true
+end
+
 function BotSystem.doCastSpell(player, state, target)
 	local now = os.time()
 	if now - state.lastAttackTime < BOT_CONFIG.ATTACK_COOLDOWN then return end
@@ -8745,9 +10138,13 @@ function BotSystem.doCastSpell(player, state, target)
 			.. " at (" .. tpos.x .. "," .. tpos.y .. "," .. tpos.z .. ")"
 			.. " from (" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")"
 			.. " fails=" .. state.spellLOSFailCount)
-		-- Still count as combat progress since weapon auto-attack may still work
-		-- (server checks LOS independently for weapon attacks)
-		state.lastCombatProgress = now
+		-- Break PK stalemate if sight is continuously blocked
+		if state.state == BOT_STATE.PK_ATTACK and state.spellLOSFailCount >= 10 then
+			BotSystem.combatLog(player, state, "PK-STALEMATE: noLOS limit reached (" .. state.spellLOSFailCount .. "), exiting PK")
+			BotSystem.exitPK(player, state)
+			return
+		end
+		-- Do NOT count as combat progress when sight is blocked!
 		return
 	end
 
@@ -8756,25 +10153,47 @@ function BotSystem.doCastSpell(player, state, target)
 	-- Select a random available spell (level-gated, cooldown-aware, range-checked)
 	local spell = BotSystem.selectAttackSpell(player, state, target)
 	if not spell then
-		-- No spell available but weapon auto-attack is running via setTarget
-		state.lastCombatProgress = now
+		-- No spell available; weapon auto-attack runs via setTarget.
+		-- Only advance lastCombatProgress if monster has suffered damage recently.
+		if state.huntTargetLastDamagedTime and (now - state.huntTargetLastDamagedTime) < 5 then
+			state.lastCombatProgress = now
+		end
 		return
 	end
 
 	-- Ensure mana for casting via virtual potions
-	if player:getMana() < player:getMaxMana() * 0.3 then
+	if player:getMana() < player:getMaxMana() * 0.4 then
 		BotSystem.checkBotPotions(player, state)
 	end
 
-	-- For isRune spells (SD): skip castSpell (no actual spell to cast), apply damage directly
+	-- For isRune spells (SD, GFB, Avalanche, Stone Shower, Thunderstorm): check & consume physical rune item from backpack
 	local ok = false
 	if spell.isRune then
-		ok = true  -- rune always "succeeds"
-		-- Visual: show projectile + effect
-		if spell.effect then
-			tpos:sendMagicEffect(spell.effect)
+		local runeId = 3155 -- Sudden Death
+		if spell.name:find("flam") or spell.name:find("fireball") then runeId = 3191
+		elseif spell.name:find("frigo") or spell.name:find("avalanche") then runeId = 3161
+		elseif spell.name:find("tera") or spell.name:find("stone") then runeId = 3175
+		elseif spell.name:find("vis") or spell.name:find("thunder") then runeId = 3202
+		end
+
+		if player:getItemCount(runeId) > 0 then
+			player:removeItem(runeId, 1)
+			player:say(spell.name, TALKTYPE_MONSTER_SAY)
+			ok = true
+			if spell.effect then
+				tpos:sendMagicEffect(spell.effect)
+			end
+		else
+			ok = false
+			state["spellCd_" .. spell.name] = now + 6
 		end
 	else
+		-- Paga a mana da spell (bots gastam mana de verdade). Sem mana: nao casta,
+		-- bebe pot se tiver e deixa o auto-attack de arma seguir.
+		if not BotSystem.trySpendSpellMana(player, spell.name) then
+			BotSystem.checkBotPotions(player, state)
+			return
+		end
 		-- Cast through real spell system — spell uses attackedCreature for targeting
 		ok = player:castSpell(spell.name, target)
 	end
@@ -8794,6 +10213,15 @@ function BotSystem.doCastSpell(player, state, target)
 			local level = player:getLevel()
 			local dmg = math.floor(baseDmg * (1 + level / 100) * (0.8 + math.random() * 0.4))
 			target:addHealth(-dmg, spell.combatType or COMBAT_PHYSICALDAMAGE, player)
+			if targetPlayer then
+				local tGuid = targetPlayer:getGuid()
+				local tState = BotState and BotState[tGuid]
+				if tState then
+					tState.lastPvpAttackerGuid = player:getGuid()
+					tState.lastPvpAttackerName = player:getName()
+					tState.lastPvpAttackerTime = os.time()
+				end
+			end
 			BotSystem.combatLogForce(player, state, "SPELL-DMG: " .. spell.name
 				.. " -" .. dmg .. "hp to " .. target:getName()
 				.. " (base=" .. baseDmg .. " lv=" .. level .. ")"
@@ -8867,6 +10295,11 @@ function BotSystem.doHealing(player, state)
 	local healAmount = bestHeal.heal + math.floor(level / 5 + magicLevel * 2)
 	local pos = player:getPosition()
 
+	-- Paga a mana da cura. Sem mana: nao cura por spell, tenta pot (HP/mana).
+	if not BotSystem.trySpendSpellMana(player, bestHeal.name) then
+		BotSystem.checkBotPotions(player, state)
+		return
+	end
 	player:say(bestHeal.name, TALKTYPE_MONSTER_SAY)
 	pos:sendMagicEffect(CONST_ME_MAGIC_BLUE)
 	player:addHealth(healAmount)
@@ -9106,6 +10539,28 @@ function BotSystem.tryStartHunt(player, state)
 	local eligible = BotHuntData.findHuntsForBot(player, botData, arch, state)
 	if #eligible == 0 then
 		return false
+	end
+
+	-- Fix 3: Filter out blacklisted hunts (recently aborted)
+	local now = os.time()
+	if state.huntBlacklist then
+		local filtered = {}
+		for _, entry in ipairs(eligible) do
+			local expiry = state.huntBlacklist[entry.scriptId]
+			if not expiry or now >= expiry then
+				table.insert(filtered, entry)
+			end
+		end
+		-- Clean expired entries
+		for scriptId, expiry in pairs(state.huntBlacklist) do
+			if now >= expiry then
+				state.huntBlacklist[scriptId] = nil
+			end
+		end
+		eligible = filtered
+		if #eligible == 0 then
+			return false
+		end
 	end
 
 	-- Separate into local hunts (same town) and remote hunts (other towns)
@@ -9481,9 +10936,20 @@ function BotSystem.injectQuestAccessWaypoints(player, wps, huntId)
 end
 
 function BotSystem.beginHuntPhase(player, state, phase)
-	-- Skip redundant pre-hunt PREPARING city loop; go straight to TRAVEL_TO
 	if phase == HUNT_PHASE.PREPARING then
-		phase = HUNT_PHASE.TRAVEL_TO
+		if BotSystem.needsPreHuntSupplies and BotSystem.needsPreHuntSupplies(player, state) then
+			state.resupplyStep = "depot"
+			state.resupplyStartTime = os.time()
+			state.resupplyUntil = 0
+			state.resupplyRoute = nil
+			state.huntPhase = HUNT_PHASE.PREPARING
+			state.state = BOT_STATE.HUNTING
+			BotSystem.castDebug(player, state, "Hunt prep: suprimentos baixos, consultando NotJev e comprando na loja")
+			logger.info(string.format("[Bot:%s] PREPARING: Suprimentos baixos antes da hunt! Consultando NotJev e comprando na loja.", player:getName()))
+			return
+		else
+			phase = HUNT_PHASE.TRAVEL_TO
+		end
 	end
 
 	BotSystem.castDebug(player, state, "Hunt phase: " .. (HUNT_PHASE_NAMES[phase] or tostring(phase)))
@@ -9494,18 +10960,38 @@ function BotSystem.beginHuntPhase(player, state, phase)
 	state.walkTarget = nil
 	state.currentPOI = nil
 	state.state = BOT_STATE.HUNTING
+	state.templeRelocations = 0
+	state.walkHistory = {}
+	state.walkHistoryIdx = 0
+	state.stuckStartTime = nil
+	state.pathFailCount = 0
+	-- Fix 1: Track whether bot has left PZ at least once during this hunt phase
+	if phase == HUNT_PHASE.PATROLLING or phase == HUNT_PHASE.LEAVING then
+		state.hasLeftPzDuringHunt = false
+	end
 
 	if phase == HUNT_PHASE.TRAVEL_TO then
-		local rawWps = BotSystem.getResolvedHuntWaypoints(player, state.huntScriptId, "travel_to")
-		local sanitized = BotSystem.sanitizeTravelWaypoints(player, rawWps)
-		local withKeys = BotSystem.injectKeyAcquisitionWaypoints(player, sanitized, state.huntScriptId)
-		state.huntWaypoints = BotSystem.injectQuestAccessWaypoints(player, withKeys, state.huntScriptId)
-		if not state.huntWaypoints or #state.huntWaypoints == 0 then
-			-- No travel_to phase, go straight to patrol
+		-- Teleport bot directly to the cave entrance (first patrol waypoint)
+		local patrolWps = BotSystem.getResolvedHuntWaypoints(player, state.huntScriptId, "hunt_patrol")
+		if patrolWps and #patrolWps > 0 then
+			local caveEntrance = Position(patrolWps[1].pos_x, patrolWps[1].pos_y, patrolWps[1].pos_z)
+			player:teleportTo(caveEntrance, true)
+			logger.info(string.format("[Bot] %s teleported to cave entrance (%d,%d,%d) for hunt %s",
+				player:getName(), caveEntrance.x, caveEntrance.y, caveEntrance.z,
+				tostring(state.huntScriptId)))
 			BotSystem.beginHuntPhase(player, state, HUNT_PHASE.PATROLLING)
-			return
+		else
+			logger.warn(string.format("[Bot] %s has no patrol waypoints for hunt %s, aborting",
+				player:getName(), tostring(state.huntScriptId)))
+			BotSystem.abortHunt(player, state, "no patrol waypoints")
 		end
+		return
 	elseif phase == HUNT_PHASE.PATROLLING then
+		pcall(function()
+			if (player:getCapacity() or 0) < 2000000 then
+				player:setCapacity(2000000)
+			end
+		end)
 		state.huntWaypoints = BotSystem.getResolvedHuntWaypoints(player, state.huntScriptId, "hunt_patrol")
 		if not state.huntWaypoints or #state.huntWaypoints == 0 then
 			-- No patrol waypoints, abort
@@ -9515,22 +11001,18 @@ function BotSystem.beginHuntPhase(player, state, phase)
 		logger.info("[Bot] " .. player:getName() .. " entering PATROLLING phase ("
 			.. #state.huntWaypoints .. " waypoints)")
 	elseif phase == HUNT_PHASE.LEAVING then
-		state.huntWaypoints = BotHuntData.getPhaseWaypoints(state.huntScriptId, "travel_from")
-		if not state.huntWaypoints or #state.huntWaypoints == 0 then
-			-- No travel_from, reverse sanitized travel_to
-			local rawTravelTo = BotSystem.getResolvedHuntWaypoints(player, state.huntScriptId, "travel_to")
-			local travelTo = BotSystem.sanitizeTravelWaypoints(player, rawTravelTo)
-			if travelTo and #travelTo > 0 then
-				state.huntWaypoints = {}
-				for i = #travelTo, 1, -1 do
-					state.huntWaypoints[#state.huntWaypoints + 1] = travelTo[i]
-				end
-			else
-				-- No travel waypoints at all, just end the hunt
-				BotSystem.beginHuntPhase(player, state, HUNT_PHASE.RESUPPLYING)
-				return
+		-- Bots no longer walk travel_from across wilderness/continents: teleport directly back to town temple
+		local town = player:getTown()
+		if town then
+			local templePos = town:getTemplePosition()
+			if templePos then
+				player:teleportTo(templePos, true)
+				logger.info(string.format("[Bot] %s teleported back to temple (%d,%d,%d) leaving hunt %s",
+					player:getName(), templePos.x, templePos.y, templePos.z, tostring(state.huntScriptId)))
 			end
 		end
+		BotSystem.beginHuntPhase(player, state, HUNT_PHASE.RESUPPLYING)
+		return
 	elseif phase == HUNT_PHASE.RESUPPLYING then
 		state.huntWaypoints = nil
 		state.resupplyStep = "bank"
@@ -9564,8 +11046,38 @@ function BotSystem.doHunting(player, state)
 	-- Guard: if we're in HUNTING state but have no hunt phase AND no cavebot command,
 	-- fall back to IDLE. This catches bots left in HUNTING after cavebot commands complete.
 	if not state.huntPhase and not state.cavebotCommand then
+		-- Fix 7: Release hunt reservation if still held to prevent permanent slot leak
+		if state.huntScriptId then
+			BotHuntData.releaseHunt(state.huntScriptId, player:getGuid())
+			logger.warn("[Bot] " .. player:getName() .. " released leaked hunt reservation for script " .. tostring(state.huntScriptId))
+			state.huntScriptId = nil
+		end
 		state.state = BOT_STATE.IDLE
 		state.verboseLog = state.verboseLogAutoEnabled or false
+		return
+	end
+
+	-- Protection Zone Failsafe: if bot is in PZ while supposed to be in a cave patrolling,
+	-- AND it has previously left the PZ (proving it reached the cave and came back, e.g. death/teleport),
+	-- abort the hunt. This avoids aborting hunts during the initial city walkout.
+	local pos = player:getPosition()
+	local tile = Tile(pos)
+	local inPz = tile and tile:hasFlag(TILESTATE_PROTECTIONZONE)
+	-- Fix 1: Track when bot leaves PZ so we know it actually reached the cave
+	if not inPz then
+		state.hasLeftPzDuringHunt = true
+	end
+	if inPz and state.hasLeftPzDuringHunt and state.huntPhase == HUNT_PHASE.PATROLLING then
+		logger.warn(string.format("[Bot] %s in PZ (%d,%d,%d) during PATROLLING after having left PZ — aborting hunt",
+			player:getName(), pos.x, pos.y, pos.z))
+		BotSystem.abortHunt(player, state, "returned to PZ during patrol")
+		return
+	end
+	-- Fix 6: LEAVING in PZ means the bot arrived back in town — transition to endHunt (resupply) instead of abort
+	if inPz and state.huntPhase == HUNT_PHASE.LEAVING then
+		logger.info(string.format("[Bot] %s arrived back in PZ during LEAVING — ending hunt normally for resupply",
+			player:getName()))
+		BotSystem.endHunt(player, state)
 		return
 	end
 
@@ -9673,12 +11185,74 @@ function BotSystem.doHuntPatrol(player, state)
 		BotSystem.sayRandom(player, state, "hunting")
 	end
 
-	-- Check if hunt time expired
-	if state.huntEndTime and os.time() >= state.huntEndTime then
-		local remaining = state.huntEndTime - os.time()
-		BotSystem.castDebug(player, state, "PATROL: hunt time expired, kills=" .. (state.huntKillCount or 0)
-			.. " cycles=" .. (state.huntCycles or 0) .. ", leaving spawn")
+	-- Pots/suprimentos NAO pesam na cap dos bots (piso generoso de 20.000 oz = 2000000)
+	pcall(function()
+		if (player:getCapacity() or 0) < 2000000 then
+			player:setCapacity(2000000)
+		end
+	end)
+
+	-- Check if hunt time expired OR capacity is low OR backpacks are full
+	local freeCap = player:getFreeCapacity()
+	local freeSlots = BotSystem.getFreeBackpackSlots(player)
+	-- Para bots, poções e suprimentos não pesam; só sai se a capacidade estiver esgotada (< 1.0 oz)
+	local capLow = freeCap < 100
+	local bpFull = freeSlots <= 0
+	local timeExpired = state.huntEndTime and os.time() >= state.huntEndTime
+
+	-- Se a capacidade estiver baixa ou mochilas cheias, tenta descartar lixo antes de abandonar a hunt
+	if capLow or bpFull then
+		BotSystem.dropIrrelevantItems(player)
+		freeCap = player:getFreeCapacity()
+		freeSlots = BotSystem.getFreeBackpackSlots(player)
+		capLow = freeCap < 100
+		bpFull = freeSlots <= 0
+	end
+
+	-- Se recém chegou na hunt (0 kills) e ainda tem capacidade mínima operacional (>= 0.5 oz), não abandona imediatamente
+	if capLow and (state.huntKillCount or 0) == 0 and freeCap >= 50 then
+		capLow = false
+	end
+
+	if timeExpired or capLow or bpFull then
+		local reason = timeExpired and "hunt time expired" or (capLow and string.format("capacity low (%.1f oz)", freeCap / 100) or "backpacks full (0 slots)")
+		BotSystem.castDebug(player, state, "PATROL: " .. reason .. ", kills=" .. (state.huntKillCount or 0)
+			.. " cycles=" .. (state.huntCycles or 0) .. ", leaving spawn to Depot")
+		logger.info(string.format("[Bot:%s] Leaving hunt: %s (kills=%d, freeCap=%.1foz, freeSlots=%d)",
+			player:getName(), reason, state.huntKillCount or 0, freeCap / 100, freeSlots))
 		BotSystem.beginHuntPhase(player, state, HUNT_PHASE.LEAVING)
+		return
+	end
+
+	-- PRIORIDADE MÁXIMA: Disputas de cave têm prioridade sobre qualquer monstro!
+	local inFight, session = false, nil
+	if BotDispute and BotDispute.isPlayerInFight then
+		inFight, session = BotDispute.isPlayerInFight(player:getGuid())
+	end
+
+	if inFight and session then
+		local rival = BotDispute.getRivalTarget(player:getGuid())
+		if rival and not rival:isRemoved() and rival:getHealth() > 0 then
+			local rpos = rival:getPosition()
+			local pos = player:getPosition()
+			if pos.z == rpos.z and math.max(math.abs(pos.x - rpos.x), math.abs(pos.y - rpos.y)) <= 18 then
+				-- Cancela alvo de monstros e foca 100% no rival player até a morte
+				state.huntMonsterTarget = nil
+				state.huntMonsterLastPos = nil
+				state.state = BOT_STATE.PK_ATTACK
+				state.pkTarget = rival:getId()
+				state.pkStartTime = state.pkStartTime or os.time()
+				state.lastAttackTime = 0
+				state.lastCombatProgress = os.time()
+				player:setTarget(rival)
+				BotSystem.doPKAttack(player, state)
+				return
+			end
+		end
+	end
+
+	-- Verifica encontro físico na cave para iniciar negociação ou disputa
+	if BotSystem.checkCaveEncounter(player, state) then
 		return
 	end
 
@@ -9699,8 +11273,48 @@ function BotSystem.doHuntPatrol(player, state)
 		BotSystem.doPartyHealing(player, state, party)
 	end
 
-	-- Check for cave encounter / dispute (PK, Party, Share, Leave with 15-min cooldown)
-	BotSystem.checkCaveEncounter(player, state)
+	-- If waypoint idx is 0 (just started patrol), initialize to 1 first
+	if (state.huntWaypointIdx or 0) == 0 then
+		BotSystem.advanceHuntWaypoint(player, state)
+	end
+
+	-- AREA-CLEARING CHECK:
+	-- Ensure the current area is clear of hunt targets before advancing or continuing patrol.
+	-- If there are valid hunt targets nearby, do NOT advance waypoint or walk away.
+	local pos = player:getPosition()
+	local nearbyMonsters = BotSystem.getNearbyHuntMonsters(player, state)
+	if #nearbyMonsters > 0 then
+		local now = os.time()
+		state.huntAreaHoldTime = state.huntAreaHoldTime or now
+		state.huntAreaHoldPos = state.huntAreaHoldPos or { x = pos.x, y = pos.y, z = pos.z }
+
+		-- Watchdog: if held in the same area for > 15 seconds without kills/damage, ignore unreachable candidates
+		if (now - state.huntAreaHoldTime) > 15 then
+			for _, m in ipairs(nearbyMonsters) do
+				if not state.huntIgnoredMonsters then state.huntIgnoredMonsters = {} end
+				state.huntIgnoredMonsters[m.id] = now + BOT_CONFIG.HUNT_IGNORE_DURATION
+				BotSystem.combatLogForce(player, state, "HUNT-AREA-CLEAR-WATCHDOG: ignoring unreachable "
+					.. m.name .. " (id=" .. m.id .. ") after 15s hold")
+			end
+			state.huntAreaHoldTime = nil
+			state.huntAreaHoldPos = nil
+		else
+			-- Stop any residual waypoint movement
+			if player:isWalking() then
+				player:stopWalk()
+			end
+			-- Force immediate monster scan and combat engagement
+			state.huntScanCooldown = 0
+			if BotSystem.scanAndAttackHuntTarget(player, state) then
+				return
+			end
+			-- If scan did not lock (e.g. out of direct LOS), hold waypoint and retry next tick
+			return
+		end
+	else
+		state.huntAreaHoldTime = nil
+		state.huntAreaHoldPos = nil
+	end
 
 	-- Check waypoint arrival BEFORE navigating (handles proximity-based advancement)
 	local advanced = BotSystem.advanceHuntWaypoint(player, state)
@@ -9965,6 +11579,28 @@ function BotSystem.navigateToHuntWaypoint(player, state)
 
 	-- Z-transition needed?
 	if pos.z ~= targetPos.z then
+		-- If first waypoints are underground but bot is currently at surface during TRAVEL_TO,
+		-- check if there is a surface waypoint in the route that leads to the entrance!
+		if state.huntPhase == HUNT_PHASE.TRAVEL_TO then
+			local bestIdx = nil
+			local bestDist = 9999
+			for i, w in ipairs(wps) do
+				if w and w.pos_x and w.pos_x > 0 and w.pos_z == pos.z then
+					local d = math.max(math.abs(pos.x - w.pos_x), math.abs(pos.y - w.pos_y))
+					if d < bestDist and d <= BOT_CONFIG.PATH_MAX_DIST then
+						bestDist = d
+						bestIdx = i
+					end
+				end
+			end
+			if bestIdx and bestIdx ~= idx then
+				BotSystem.castDebug(player, state, "TRAVEL_TO: wp " .. idx .. " on wrong z (" .. targetPos.z .. " vs " .. pos.z .. "), snapping to surface wp " .. bestIdx)
+				state.huntWaypointIdx = bestIdx
+				state.huntWaypointSkipCount = 0
+				return
+			end
+		end
+
 		-- If floor change state machine is already running, let it finish
 		if state.floorChangeState ~= FLOOR_CHANGE_STATE.NONE then
 			return
@@ -10440,23 +12076,89 @@ function BotSystem.processPendingLoot(player, state)
 								local inside = item:getItems(true)
 								local lootedDesc = {}
 								if inside and #inside > 0 then
-									for i = #inside, 1, -1 do
-										local sub = inside[i]
+									local coinItems = {}
+									local otherItems = {}
+
+									for _, sub in ipairs(inside) do
 										if sub and not sub:isContainer() then
 											local subId = sub:getId()
-											local subCount = sub:getCount() or 1
-											local subName = sub:getName() or ("item#" .. subId)
-											if subId == 3031 then
-												player:setBankBalance(player:getBankBalance() + subCount)
-											elseif subId == 3035 then
-												player:setBankBalance(player:getBankBalance() + subCount * 100)
-											elseif subId == 3043 then
-												player:setBankBalance(player:getBankBalance() + subCount * 10000)
+											if subId == 3031 or subId == 3035 or subId == 3043 then
+												table.insert(coinItems, sub)
 											else
-												pcall(function() player:addItem(subId, subCount, false) end)
+												table.insert(otherItems, sub)
 											end
-											lootedDesc[#lootedDesc + 1] = (subCount > 1 and (subCount .. "x ") or "") .. subName
-											sub:remove()
+										end
+									end
+
+									-- 1. Moedas fisicas (Gold, Platinum, Crystal) depositadas diretamente na conta bancaria do personagem
+									local totalLootedGp = 0
+									for _, coin in ipairs(coinItems) do
+										local cId = coin:getId()
+										local cCount = coin:getCount() or 1
+										local mult = 1
+										if cId == 3035 then mult = 100
+										elseif cId == 3043 then mult = 10000 end
+										totalLootedGp = totalLootedGp + (cCount * mult)
+										coin:remove()
+									end
+									if totalLootedGp > 0 then
+										player:setBankBalance(player:getBankBalance() + totalLootedGp)
+										lootedDesc[#lootedDesc + 1] = string.format("%d gp (direto banco)", totalLootedGp)
+									end
+
+									-- 2. Cotacao e ordenacao decrescente de outros itens por valor de mercado/NPC
+									local pricedItems = {}
+									for _, sub in ipairs(otherItems) do
+										local subId = sub:getId()
+										local subCount = sub:getCount() or 1
+										local itType = sub:getType()
+										local subWeight = (itType and itType:getWeight()) or 100
+
+										local unitPrice = 0
+										local res = db.storeQuery(string.format("SELECT buy_offer, day_avg_sell, npc_buy FROM tibia_market_items WHERE item_id = %d LIMIT 1", subId))
+										if res then
+											local bOff = Result.getNumber(res, "buy_offer")
+											local dAvg = Result.getNumber(res, "day_avg_sell")
+											local npcB = Result.getNumber(res, "npc_buy")
+											Result.free(res)
+											unitPrice = (bOff > 0 and bOff) or (dAvg > 0 and dAvg) or (npcB > 0 and npcB) or 0
+										end
+
+										table.insert(pricedItems, {
+											item = sub,
+											id = subId,
+											count = subCount,
+											name = sub:getName() or ("item#" .. subId),
+											price = unitPrice,
+											weight = subWeight
+										})
+									end
+
+									table.sort(pricedItems, function(a, b)
+										return a.price > b.price
+									end)
+
+									-- 3. Loot apenas de itens lucrativos (valor unitario >= 30 gp) respeitando Cap e Slots
+									local freeCap = player:getFreeCapacity()
+									if freeCap < 3000 then
+										BotSystem.dropIrrelevantItems(player)
+										freeCap = player:getFreeCapacity()
+									end
+									for _, pi in ipairs(pricedItems) do
+										if pi.price >= 30 then
+											local totalItemWeight = pi.weight * pi.count
+											if freeCap >= totalItemWeight then
+												local ok = pcall(function() player:addItem(pi.id, pi.count, false) end)
+												if ok then
+													freeCap = freeCap - totalItemWeight
+													lootedDesc[#lootedDesc + 1] = (pi.count > 1 and (pi.count .. "x ") or "") .. pi.name .. " (" .. (pi.price * pi.count) .. "gp)"
+													pi.item:remove()
+												end
+											else
+												BotSystem.castDebug(player, state, "LOOT: sem cap para " .. pi.name)
+											end
+										else
+											BotSystem.castDebug(player, state, "LOOT: descartou lixo " .. pi.name .. " (val: " .. pi.price .. "gp)")
 										end
 									end
 								end
@@ -10507,11 +12209,94 @@ function BotSystem.processPendingLoot(player, state)
 	return false
 end
 
+-- Build target name lookup dictionary from hunt targets (supports comma-separated names)
+function BotSystem.getHuntTargetNameLookup(targets)
+	local targetNames = {}
+	if not targets then return targetNames end
+	for _, t in ipairs(targets) do
+		local tname = t.monster_name
+		if tname and #tname > 0 then
+			if tname:find(",") then
+				for part in tname:gmatch("[^,]+") do
+					local trimmed = part:match("^%s*(.-)%s*$")
+					if trimmed and #trimmed > 0 then
+						targetNames[trimmed:lower()] = t
+					end
+				end
+			else
+				local trimmed = tname:match("^%s*(.-)%s*$")
+				if trimmed and #trimmed > 0 then
+					targetNames[trimmed:lower()] = t
+				end
+			end
+		end
+	end
+	return targetNames
+end
+
+-- Get all valid, reachable hunt monsters in the area around the player (filters out intruders)
+function BotSystem.getNearbyHuntMonsters(player, state, radius)
+	if not player or player:isRemoved() or not state then return {} end
+	local pos = player:getPosition()
+	if not pos then return {} end
+
+	local scanRadius = radius or BOT_CONFIG.HUNT_MONSTER_SCAN_RADIUS or 7
+	local spectators = Game.getSpectators(pos, false, false, scanRadius, scanRadius, scanRadius, scanRadius)
+	if not spectators or #spectators == 0 then return {} end
+
+	local targets = state.huntTargets or {}
+	local targetNames = BotSystem.getHuntTargetNameLookup(targets)
+	local pId = player:getId()
+	local candidates = {}
+
+	for _, creature in ipairs(spectators) do
+		if creature ~= player and not creature:isRemoved() and creature:getHealth() > 0 then
+			local cid = creature:getId()
+			if creature:isMonster() and not BotSystem.isMonsterIgnored(state, cid) then
+				local cpos = creature:getPosition()
+				if cpos.z == pos.z then
+					local cname = creature:getName():lower()
+					local targetInfo = targetNames[cname]
+					local targetCreature = creature:getTarget()
+					local isTargetingMe = targetCreature and targetCreature:getId() == pId
+					-- Only count hunt targets or active aggressors (ignore passive/neutral intruders)
+					if targetInfo or isTargetingMe then
+						local dist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
+						candidates[#candidates + 1] = {
+							creature = creature,
+							name = creature:getName(),
+							id = cid,
+							pos = cpos,
+							dist = dist,
+							priority = targetInfo and (targetInfo.priority or 1) or (isTargetingMe and 2 or 1),
+							isTarget = (targetInfo ~= nil),
+							isAggressor = (isTargetingMe == true)
+						}
+					end
+				end
+			end
+		end
+	end
+
+	return candidates
+end
+
 -- Scan for monsters and attack highest-priority target
 -- Uses native targeting: setAttackedCreature (red box) -> server auto-attacks with weapon.
 -- Chase mode is enabled in C++, so server handles follow/pathfinding for melee (knights).
 -- Mages use manual cardinal positioning to maintain range and LOS.
 function BotSystem.scanAndAttackHuntTarget(player, state)
+	-- Se o bot estiver em PK_ATTACK ou em disputa ativa (FIGHT), ignora monstros completamente!
+	if state.state == BOT_STATE.PK_ATTACK then
+		return false
+	end
+	if BotDispute and BotDispute.isPlayerInFight then
+		local inFight = BotDispute.isPlayerInFight(player:getGuid())
+		if inFight then
+			return false
+		end
+	end
+
 	local pos = player:getPosition()
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
@@ -10529,11 +12314,39 @@ function BotSystem.scanAndAttackHuntTarget(player, state)
 			state.huntMonsterLastPos = { x = mpos.x, y = mpos.y, z = mpos.z, name = monster:getName() }
 			local dist = math.max(math.abs(pos.x - mpos.x), math.abs(pos.y - mpos.y))
 			if dist <= BOT_CONFIG.HUNT_MONSTER_SCAN_RADIUS + 5 then
+				local now = os.time()
 				-- Ensure target is set (server handles auto-attack with weapon)
-				if player:getTarget() ~= monster then
+				-- Knights (voc 4) and Paladins (voc 3) rely on weapon auto-attack.
+				-- Re-kicking setTarget every 2s re-engages checkCreatureAttack() in Canary C++ if the attack task stalled.
+				if player:getTarget() ~= monster or (baseVoc >= 3 and (state.lastTargetKick or 0) + 2 <= now) then
+					state.lastTargetKick = now
 					player:setTarget(monster)
 				end
 				local hasLOS = pos.z == mpos.z and pos:isSightClear(mpos, true)
+
+				-- Track monster HP and abort if stuck without dealing damage for 15s
+				local currentMonsterHp = monster:getHealth()
+				if state.huntMonsterTarget ~= state.lastTrackedTargetId then
+					state.lastTrackedTargetId = state.huntMonsterTarget
+					state.huntTargetLastHp = currentMonsterHp
+					state.huntTargetLastDamagedTime = now
+				elseif currentMonsterHp < (state.huntTargetLastHp or currentMonsterHp) then
+					state.huntTargetLastHp = currentMonsterHp
+					state.huntTargetLastDamagedTime = now
+					state.lastCombatProgress = now
+					state.huntAreaHoldTime = now
+				elseif hasLOS and dist <= attackRange and (now - (state.huntTargetLastDamagedTime or now)) >= 15 then
+					local mid = state.huntMonsterTarget
+					BotSystem.combatLogForce(player, state, "HUNT-NO-DAMAGE: aborting target "
+						.. monster:getName() .. " (hp=" .. currentMonsterHp .. "/" .. monster:getMaxHealth() .. ") - no damage dealt in 15s")
+					player:setTarget(nil)
+					state.huntMonsterTarget = nil
+					state.huntMonsterLastPos = nil
+					state.huntChaseFailCount = 0
+					if not state.huntIgnoredMonsters then state.huntIgnoredMonsters = {} end
+					state.huntIgnoredMonsters[mid] = now + BOT_CONFIG.HUNT_IGNORE_DURATION
+					return true
+				end
 
 				-- Periodically cast spells (spell system uses attackedCreature for targeting)
 				BotSystem.doCastSpell(player, state, monster)
@@ -10556,6 +12369,10 @@ function BotSystem.scanAndAttackHuntTarget(player, state)
 				elseif dist <= attackRange and hasLOS then
 					-- In range with LOS — weapon auto-attacks + spells handle damage
 					state.huntChaseFailCount = 0
+					-- Stop any residual waypoint walk so bot doesn't drift away
+					if player:isWalking() then
+						player:stopWalk()
+					end
 					-- Mages: disable chase mode to hold position at range
 					if (baseVoc == 1 or baseVoc == 2) and dist >= 2 then
 						player:setChaseMode(false)
@@ -10600,8 +12417,12 @@ function BotSystem.scanAndAttackHuntTarget(player, state)
 					end
 				end
 
+				local weaponItem = player:getSlotItem(CONST_SLOT_LEFT) or player:getSlotItem(CONST_SLOT_RIGHT)
+				local weaponId = weaponItem and weaponItem:getId() or 0
 				BotSystem.combatLog(player, state, "HUNT-COMBAT: " .. monster:getName()
 					.. " dist=" .. dist .. " LOS=" .. tostring(hasLOS)
+					.. " hp=" .. (currentMonsterHp or monster:getHealth()) .. "/" .. monster:getMaxHealth()
+					.. " weapon=" .. weaponId
 					.. " walking=" .. tostring(player:isWalking())
 					.. " chaseFails=" .. (state.huntChaseFailCount or 0))
 				return true
@@ -10614,6 +12435,8 @@ function BotSystem.scanAndAttackHuntTarget(player, state)
 		state.huntMonsterTarget = nil
 		state.huntChaseFailCount = 0
 		state.huntKillCount = (state.huntKillCount or 0) + 1
+		state.huntAreaHoldTime = nil
+		state.huntAreaHoldPos = nil
 		if state.huntMonsterLastPos then
 			state.pendingLootPos = Position(state.huntMonsterLastPos.x, state.huntMonsterLastPos.y, state.huntMonsterLastPos.z)
 			state.pendingLootMonsterName = state.huntMonsterLastPos.name
@@ -10649,20 +12472,7 @@ function BotSystem.scanAndAttackHuntTarget(player, state)
 	if not spectators or #spectators == 0 then return false end
 
 	-- Build target name lookup (handle comma-separated names like "Rotworm, Carrion Worm")
-	local targetNames = {}
-	for _, t in ipairs(targets) do
-		local tname = t.monster_name
-		if tname:find(",") then
-			for part in tname:gmatch("[^,]+") do
-				local trimmed = part:match("^%s*(.-)%s*$")
-				if trimmed and #trimmed > 0 then
-					targetNames[trimmed:lower()] = t
-				end
-			end
-		else
-			targetNames[tname:lower()] = t
-		end
-	end
+	local targetNames = BotSystem.getHuntTargetNameLookup(targets)
 
 	-- Collect ALL matching monsters (sorted by priority then distance)
 	local candidates = {}
@@ -10780,8 +12590,13 @@ function BotSystem.scanAndAttackHuntTarget(player, state)
 				.. " LOS=" .. tostring(hasLOS) .. " voc=" .. baseVoc
 				.. " at (" .. mpos.x .. "," .. mpos.y .. "," .. mpos.z .. ")")
 
+			-- Stop any residual waypoint walk before engaging/chasing
+			if player:isWalking() then
+				player:stopWalk()
+			end
+
 			-- Start chase if needed
-			if dist > attackRange and not player:isWalking() then
+			if dist > attackRange then
 				if baseVoc == 1 or baseVoc == 2 then
 					player:setChaseMode(false)
 					local dirs = BotSystem.findCardinalAttackPosition(player, mpos, attackRange)
@@ -11092,7 +12907,13 @@ function BotSystem.checkEquipmentUpgrade(player, state)
 	}
 
 	for _, s in ipairs(slots) do
-		local opt = BotEquipmentData.getOptionForSlot and BotEquipmentData.getOptionForSlot(bracket, vocStr, s.name, personality)
+		local opt = nil
+		if s.name == "right" and baseVoc == 4 then
+			local loadout = BotEquipmentData.getLoadout(curLevel, baseVoc, personality, player)
+			opt = { item_id = loadout.slot_right, name = "knight weapon" }
+		else
+			opt = BotEquipmentData.getOptionForSlot and BotEquipmentData.getOptionForSlot(bracket, vocStr, s.name, personality)
+		end
 		if opt and opt.item_id and opt.item_id > 0 then
 			local curItem = player:getSlotItem(s.slot)
 			local curId = curItem and curItem:getId() or 0
@@ -11148,13 +12969,19 @@ function BotSystem.processDepotLootAndBank(player, state)
 	end
 
 	-- 2. Venda Instantânea de Loot/Creature Products pelo preço de mercado de Venebra
+	local protectedItemIds = {
+		[3003] = true, [3457] = true, [3456] = true, [3308] = true, [5710] = true, -- tools
+		[268] = true, [266] = true, [315] = true, [316] = true, [317] = true, [318] = true, [7642] = true, [7643] = true, -- potions
+		[3725] = true, [3582] = true, [3577] = true, -- food
+		[3155] = true, [3191] = true, [3161] = true, [3175] = true, [3160] = true, [3152] = true, [3178] = true, [3198] = true, [3189] = true -- runes
+	}
 	local lootSold = {}
 	local bpItemsRemaining = backpack:getItems(true)
 	if bpItemsRemaining and #bpItemsRemaining > 0 then
 		for _, item in ipairs(bpItemsRemaining) do
 			local id = item:getId()
 			local count = item:getCount() or 1
-			if id ~= 3003 and id ~= 3457 and id ~= 5710 and id ~= 268 and id ~= 266 and id ~= 7590 and id ~= 7591 and not item:isContainer() then
+			if not protectedItemIds[id] and not item:isContainer() then
 				local res = db.storeQuery(string.format("SELECT buy_offer, day_avg_sell, npc_buy FROM tibia_market_items WHERE item_id = %d LIMIT 1", id))
 				if res then
 					local bOff = Result.getNumber(res, "buy_offer")
@@ -11182,13 +13009,227 @@ function BotSystem.processDepotLootAndBank(player, state)
 		logger.info(string.format("[Bot:%s] [MARKET-VENEBRA] Vendeu %d itens de loot por %d gold no Market de Venebra.", player:getName(), itemsSold, soldLootGold))
 	end
 
-	-- 3. Upgrade de Equipamento a cada 3 níveis utilizando o saldo bancário
+	-- 3. Upgrade de Equipamento e Anti-Pelado
+	BotSystem.checkEquipmentCompleteness(player, state)
 	local curLevel = player:getLevel()
 	state.lastUpgradeLevel = state.lastUpgradeLevel or 0
 	if (curLevel % 3 == 0) or (curLevel - state.lastUpgradeLevel >= 3) then
 		BotSystem.checkEquipmentUpgrade(player, state)
 		state.lastUpgradeLevel = curLevel
 	end
+end
+
+-- Piso mínimo de sobrevivência no banco garantido por faixa de nível
+function BotSystem.getMinBankBalance(level)
+	level = level or 8
+	if level >= 200 then
+		return 150000
+	elseif level >= 130 then
+		return 80000
+	elseif level >= 100 then
+		return 45000
+	elseif level >= 80 then
+		return 25000
+	elseif level >= 50 then
+		return 12000
+	elseif level >= 20 then
+		return 3500
+	else
+		return 1000
+	end
+end
+
+-- Tabela fixa de suprimentos máximos de hunt por faixa de nível e vocação
+function BotSystem.getFixedSupplyTable(level, baseVoc)
+	level = level or 8
+	baseVoc = baseVoc or 4
+	if baseVoc == 4 then -- Knight
+		if level >= 200 then
+			return {
+				primary = { id = 7643, name = "Ultimate Health Potion", count = 650, price = 379 },
+				secondary = { id = 268, name = "Mana Potion", count = 250, price = 56 }
+			}
+		elseif level >= 130 then
+			return {
+				primary = { id = 7643, name = "Ultimate Health Potion", count = 500, price = 379 },
+				secondary = { id = 268, name = "Mana Potion", count = 200, price = 56 }
+			}
+		elseif level >= 100 then
+			return {
+				primary = { id = 316, name = "Great Health Potion", count = 400, price = 225 },
+				secondary = { id = 268, name = "Mana Potion", count = 150, price = 56 }
+			}
+		elseif level >= 80 then
+			return {
+				primary = { id = 316, name = "Great Health Potion", count = 300, price = 225 },
+				secondary = { id = 268, name = "Mana Potion", count = 120, price = 56 }
+			}
+		elseif level >= 50 then
+			return {
+				primary = { id = 315, name = "Strong Health Potion", count = 220, price = 115 },
+				secondary = { id = 268, name = "Mana Potion", count = 100, price = 56 }
+			}
+		elseif level >= 20 then
+			return {
+				primary = { id = 266, name = "Health Potion", count = 150, price = 50 },
+				secondary = { id = 268, name = "Mana Potion", count = 70, price = 56 }
+			}
+		else
+			return {
+				primary = { id = 266, name = "Health Potion", count = 70, price = 50 },
+				secondary = { id = 268, name = "Mana Potion", count = 30, price = 56 }
+			}
+		end
+	elseif baseVoc == 3 then -- Paladin
+		if level >= 200 then
+			return {
+				primary = { id = 7642, name = "Great Spirit Potion", count = 450, price = 228 },
+				secondary = { id = 317, name = "Strong Mana Potion", count = 450, price = 93 }
+			}
+		elseif level >= 130 then
+			return {
+				primary = { id = 7642, name = "Great Spirit Potion", count = 350, price = 228 },
+				secondary = { id = 317, name = "Strong Mana Potion", count = 350, price = 93 }
+			}
+		elseif level >= 100 then
+			return {
+				primary = { id = 7642, name = "Great Spirit Potion", count = 250, price = 228 },
+				secondary = { id = 317, name = "Strong Mana Potion", count = 250, price = 93 }
+			}
+		elseif level >= 80 then
+			return {
+				primary = { id = 7642, name = "Great Spirit Potion", count = 180, price = 228 },
+				secondary = { id = 317, name = "Strong Mana Potion", count = 180, price = 93 }
+			}
+		elseif level >= 50 then
+			return {
+				primary = { id = 315, name = "Strong Health Potion", count = 120, price = 115 },
+				secondary = { id = 317, name = "Strong Mana Potion", count = 120, price = 93 }
+			}
+		elseif level >= 20 then
+			return {
+				primary = { id = 266, name = "Health Potion", count = 100, price = 50 },
+				secondary = { id = 268, name = "Mana Potion", count = 100, price = 56 }
+			}
+		else
+			return {
+				primary = { id = 266, name = "Health Potion", count = 50, price = 50 },
+				secondary = { id = 268, name = "Mana Potion", count = 50, price = 56 }
+			}
+		end
+	else -- Sorcerer / Druid (Mage)
+		if level >= 200 then
+			return {
+				primary = { id = 23373, name = "Ultimate Mana Potion", count = 700, price = 150 },
+				secondary = { id = 316, name = "Great Health Potion", count = 80, price = 225 }
+			}
+		elseif level >= 130 then
+			return {
+				primary = { id = 23373, name = "Ultimate Mana Potion", count = 550, price = 150 },
+				secondary = { id = 316, name = "Great Health Potion", count = 70, price = 225 }
+			}
+		elseif level >= 100 then
+			return {
+				primary = { id = 318, name = "Great Mana Potion", count = 450, price = 144 },
+				secondary = { id = 316, name = "Great Health Potion", count = 60, price = 225 }
+			}
+		elseif level >= 80 then
+			return {
+				primary = { id = 318, name = "Great Mana Potion", count = 350, price = 144 },
+				secondary = { id = 315, name = "Strong Health Potion", count = 50, price = 115 }
+			}
+		elseif level >= 50 then
+			return {
+				primary = { id = 317, name = "Strong Mana Potion", count = 250, price = 93 },
+				secondary = { id = 315, name = "Strong Health Potion", count = 40, price = 115 }
+			}
+		elseif level >= 20 then
+			return {
+				primary = { id = 268, name = "Mana Potion", count = 200, price = 56 },
+				secondary = { id = 266, name = "Health Potion", count = 30, price = 50 }
+			}
+		else
+			return {
+				primary = { id = 268, name = "Mana Potion", count = 100, price = 56 },
+				secondary = { id = 266, name = "Health Potion", count = 20, price = 50 }
+			}
+		end
+	end
+end
+
+function BotSystem.needsPreHuntSupplies(player, state)
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	local level = player:getLevel()
+	local targets = BotSystem.getFixedSupplyTable(level, baseVoc)
+	if not targets then return false end
+
+	local primaryHave = player:getItemCount(targets.primary.id) or 0
+	local secondaryHave = player:getItemCount(targets.secondary.id) or 0
+
+	-- Se tiver menos de 50% da cota ou menos de 20 poções, reabastece
+	if primaryHave < math.max(15, math.floor(targets.primary.count * 0.50))
+		or secondaryHave < math.max(10, math.floor(targets.secondary.count * 0.50)) then
+		return true
+	end
+
+	if baseVoc == 1 or baseVoc == 2 then -- Mages
+		local runeCount = player:getItemCount(3155) + player:getItemCount(3191) + player:getItemCount(3161)
+		if level >= 30 and runeCount < 10 then
+			return true
+		end
+	end
+	local foodCount = player:getItemCount(3725)
+	if foodCount < 5 then
+		return true
+	end
+	return false
+end
+
+function BotSystem.executeShopTrade(player, state)
+	if not state or not state.pendingShoppingPlan then return end
+	local plan = state.pendingShoppingPlan
+	local totalCost = state.shoppingTotalCost or 0
+	local balance = player:getBankBalance()
+
+	if balance >= totalCost then
+		player:setBankBalance(balance - totalCost)
+		local boughtCount = 0
+		for _, it in ipairs(plan) do
+			local itemId = tonumber(it.id)
+			local count = tonumber(it.count) or 1
+			pcall(function()
+				BotSystem.addItemToBackpack(player, itemId, count)
+			end)
+			boughtCount = boughtCount + count
+		end
+		logger.info(string.format("[BotShop:%s] Comprou %d suprimentos fisicos no NPC lojista por %d gps (saldo restante no banco: %d gps).",
+			player:getName(), boughtCount, totalCost, player:getBankBalance()))
+		BotSystem.castDebug(player, state, string.format("SHOP-TRADE: comprou %d suprimentos no NPC por %d gps", boughtCount, totalCost))
+	else
+		-- Insufficient gold in bank, try with wallet money
+		local money = player:getMoney()
+		if money >= totalCost then
+			player:removeMoney(totalCost)
+			for _, it in ipairs(plan) do
+				pcall(function() BotSystem.addItemToBackpack(player, tonumber(it.id), tonumber(it.count) or 1) end)
+			end
+			logger.info(string.format("[BotShop:%s] Comprou suprimentos fisicos no NPC lojista com dinheiro da carteira por %d gps.", player:getName(), totalCost))
+		else
+			logger.warn(string.format("[BotShop:%s] Sem gold suficiente no banco (%d gp) para comprar %d gps de suprimentos.",
+				player:getName(), balance, totalCost))
+		end
+	end
+
+	-- Check equipment upgrades & completeness
+	if state.shouldUpgradeEquipment then
+		BotSystem.checkEquipmentUpgrade(player, state)
+	end
+	BotSystem.checkEquipmentCompleteness(player, state)
+
+	state.pendingShoppingPlan = nil
+	state.shoppingTotalCost = nil
+	state.shouldUpgradeEquipment = nil
 end
 
 function BotSystem.doHuntResupply(player, state)
@@ -11209,6 +13250,18 @@ function BotSystem.doHuntResupply(player, state)
 	end
 
 	local step = state.resupplyStep
+
+	-- Pots/suprimentos NAO pesam na cap dos bots (piso generoso de 20.000 oz = 2000000)
+	pcall(function() if (player:getCapacity() or 0) < 2000000 then player:setCapacity(2000000) end end)
+
+	-- Piso de sobrevivência por nível: se o bot estiver falido abaixo do mínimo de seu nível,
+	-- o banco garante a subsistência mínima para ele comprar poções básicas
+	local curLvl = player:getLevel()
+	local minBal = BotSystem.getMinBankBalance(curLvl)
+	local curBal = player:getBankBalance() or 0
+	if curBal < minBal then
+		player:setBankBalance(minBal)
+	end
 
 	-- Sub-state: walking to depot locker (after route arrival at depot)
 	if state.resupplyDepotTarget then
@@ -11382,30 +13435,214 @@ function BotSystem.doHuntResupply(player, state)
 			state.resupplyUntil = 0
 			return
 		end
-		-- Depot delay done: bypass shop (bots use virtual potions & auto-progression gear) -> done
-		BotSystem.castDebug(player, state, "RESUPPLY: depot done, -> done (bypassing shop, potions are virtual)")
+		-- Depot delay done: request shopping advice from NotJev (Decision Service)
+		local guid = player:getGuid()
+		local curLvl = player:getLevel()
+		local vocName = player:getVocation():getName()
+		local curPots = player:getItemCount(268) + player:getItemCount(266)
+		local potBucket = math.floor(curPots / 20)
+		local sig = string.format("%d_%s_%d", curLvl, vocName, potBucket)
+
+		local cached = BotSystem.refillDecisionCache[guid]
+		if cached and cached.sig == sig and (os.time() - cached.ts) < 300 then
+			state.pendingShoppingPlan = cached.plan
+			state.shoppingTotalCost = cached.cost or 0
+			state.shouldUpgradeEquipment = cached.shouldUpgrade
+			BotSystem.castDebug(player, state, string.format("ADVICE (Cache): Reusando plano NotJev com %d itens (~%d gps)",
+				cached.plan and #cached.plan or 0, state.shoppingTotalCost))
+			logger.info(string.format("[Bot:%s] [NOTJEV-CACHE] Reusando decisão em cache (%d itens, %d gps). Indo a loja/NPC.",
+				player:getName(), cached.plan and #cached.plan or 0, state.shoppingTotalCost))
+			state.resupplyStep = "shop"
+			state.resupplyUntil = 0
+			state.resupplyRoute = nil
+			state.routeIdx = nil
+			return
+		end
+
+		if not state.refillInFlight then
+			state.refillInFlight = true
+			BotSystem.castDebug(player, state, "RESUPPLY: consultando NotJev para saber o que comprar antes da hunt...")
+			local payload = {
+				bot_profile = {
+					name = player:getName(),
+					level = curLvl,
+					vocation = vocName,
+					personality = state.personality or 2
+				},
+				bot_status = {
+					bank_gold = player:getBankBalance(),
+					current_potions = curPots,
+					-- estoque real por tier (p/ o refill abater do alvo e nao comprar a mais)
+					potions_mana = player:getItemCount(268) + player:getItemCount(317) + player:getItemCount(318) + player:getItemCount(23373),
+					potions_health = player:getItemCount(266) + player:getItemCount(315) + player:getItemCount(316) + player:getItemCount(7643) + player:getItemCount(7642),
+					current_runes = player:getItemCount(3155) + player:getItemCount(3191) + player:getItemCount(3161),
+					current_food = player:getItemCount(3725)
+				}
+			}
+			BotSystem.asyncNodePost("/api/decision/refill", payload, function(res)
+				state.refillInFlight = false
+				local p = BotPlayers and BotPlayers[player:getGuid()]
+				local s = BotState and BotState[player:getGuid()]
+				if not p or p:isRemoved() or not s then return end
+
+				local planItems = (res and res.items and #res.items > 0) and res.items or nil
+				local planCost = tonumber(res and res.total_cost) or 0
+				local upgrade = res and res.should_upgrade_equipment
+
+				BotSystem.refillDecisionCache[guid] = {
+					plan = planItems,
+					cost = planCost,
+					shouldUpgrade = upgrade,
+					sig = sig,
+					ts = os.time()
+				}
+
+				if planItems then
+					s.pendingShoppingPlan = planItems
+					s.shoppingTotalCost = planCost
+					s.shouldUpgradeEquipment = upgrade
+					logger.info(string.format("[Bot:%s] [NOTJEV-ADVICE] NotJev analisou e prescreveu %d itens para compra (~%d gps). Indo a loja/NPC.",
+						p:getName(), #planItems, s.shoppingTotalCost))
+					BotSystem.castDebug(p, s, string.format("ADVICE: NotJev recomendou comprar %d itens por %d gps", #planItems, s.shoppingTotalCost))
+				else
+					s.pendingShoppingPlan = nil
+				end
+
+				s.resupplyStep = "shop"
+				s.resupplyUntil = 0
+				s.resupplyRoute = nil
+				s.routeIdx = nil
+			end, function()
+				state.refillInFlight = false
+				local p = BotPlayers and BotPlayers[player:getGuid()]
+				local s = BotState and BotState[player:getGuid()]
+				if not p or p:isRemoved() or not s then return end
+
+				-- Fallback if NotJev is offline/unreachable: usa a tabela fixa de suprimentos limitada pelo saldo bancario
+				local fallbackPlan = {}
+				local fallbackCost = 0
+				local targets = BotSystem.getFixedSupplyTable(curLvl, baseVoc)
+				local budget = p:getBankBalance() or 0
+
+				if targets then
+					local primNeed = math.max(0, targets.primary.count - p:getItemCount(targets.primary.id))
+					local primAfford = math.min(primNeed, math.floor(budget / targets.primary.price))
+					if primAfford > 0 then
+						table.insert(fallbackPlan, {
+							id = targets.primary.id,
+							name = targets.primary.name,
+							count = primAfford,
+							unit_price = targets.primary.price
+						})
+						local cost = primAfford * targets.primary.price
+						fallbackCost = fallbackCost + cost
+						budget = budget - cost
+					end
+
+					local secNeed = math.max(0, targets.secondary.count - p:getItemCount(targets.secondary.id))
+					local secAfford = math.min(secNeed, math.floor(budget / targets.secondary.price))
+					if secAfford > 0 then
+						table.insert(fallbackPlan, {
+							id = targets.secondary.id,
+							name = targets.secondary.name,
+							count = secAfford,
+							unit_price = targets.secondary.price
+						})
+						local cost = secAfford * targets.secondary.price
+						fallbackCost = fallbackCost + cost
+						budget = budget - cost
+					end
+				end
+
+				BotSystem.refillDecisionCache[guid] = {
+					plan = fallbackPlan,
+					cost = fallbackCost,
+					shouldUpgrade = false,
+					sig = sig,
+					ts = os.time()
+				}
+
+				s.pendingShoppingPlan = fallbackPlan
+				s.shoppingTotalCost = fallbackCost
+				logger.info(string.format("[Bot:%s] [NOTJEV-FALLBACK] NotJev offline, fallback de compra aplicado (%d itens). Indo a loja.",
+					p:getName(), fallbackPlan and #fallbackPlan or 0))
+				s.resupplyStep = "shop"
+				s.resupplyUntil = 0
+				s.resupplyRoute = nil
+				s.routeIdx = nil
+			end)
+			return
+		end
+
+	elseif step == "shop" then
+		if not state.pendingShoppingPlan or #state.pendingShoppingPlan == 0 then
+			state.resupplyStep = "done"
+			state.resupplyUntil = 0
+			state.resupplyRoute = nil
+			state.routeIdx = nil
+			return
+		end
+
+		if state.resupplyUntil == 0 then
+			if not state.resupplyRoute then
+				BotSystem.castDebug(player, state, "RESUPPLY: finding route to potions/magic shop")
+				state.resupplyRoute = findRouteToDestination("potions") or findRouteToDestination("runes")
+				state.routeIdx = nil
+			end
+			if state.resupplyRoute then
+				local result = BotSystem.followCityRoute(player, state, state.resupplyRoute)
+				if result == "arrived" then
+					state.resupplyLastPOI = "potions"
+					if math.random(1, 2) == 1 then
+						player:say("hi", TALKTYPE_SAY)
+					end
+					state.resupplyUntil = os.time() + math.random(2, 4)
+					BotSystem.castDebug(player, state, "RESUPPLY: arrived at magic/potion shop, waiting to trade")
+				elseif result == "failed" then
+					BotSystem.executeShopTrade(player, state)
+					state.resupplyStep = "done"
+					state.resupplyUntil = 0
+					state.resupplyRoute = nil
+					state.routeIdx = nil
+				end
+				return
+			end
+			-- No route to shop, execute trade locally in town
+			BotSystem.executeShopTrade(player, state)
+			state.resupplyStep = "done"
+			state.resupplyUntil = 0
+			return
+		end
+
+		-- Shop delay elapsed: execute the trade transaction with the shopkeeper!
+		player:say("trade", TALKTYPE_SAY)
+		BotSystem.executeShopTrade(player, state)
 		state.resupplyStep = "done"
 		state.resupplyUntil = 0
 		state.resupplyRoute = nil
 		state.routeIdx = nil
-
-	elseif step == "shop" then
-		BotSystem.castDebug(player, state, "RESUPPLY: shop bypassed, -> done (potions are virtual)")
-		state.resupplyStep = "done"
 		state.resupplyUntil = 0
 		state.resupplyRoute = nil
 		state.routeIdx = nil
 
 	elseif step == "done" then
 		if state.huntPhase == HUNT_PHASE.PREPARING then
-			-- Preparation complete — now head to the spawn
+			-- Preparation complete — now head directly to spawn
 			BotSystem.castDebug(player, state, "RESUPPLY: preparation complete, heading to spawn")
 			logger.info("[Bot] " .. player:getName() .. " preparation done, heading to spawn")
 			BotSystem.beginHuntPhase(player, state, HUNT_PHASE.TRAVEL_TO)
 		elseif state.huntPhase == HUNT_PHASE.RESUPPLYING then
-			-- Post-hunt resupply done — re-roll for another hunt or end
-			BotSystem.castDebug(player, state, "RESUPPLY: post-hunt resupply done, re-rolling")
-			BotSystem.finishResupplyAndReroll(player, state)
+			-- Intermediate refill during hunt vs end of hunt
+			local timeExpired = state.huntEndTime and os.time() >= state.huntEndTime
+			if state.huntScriptId and not timeExpired then
+				BotSystem.castDebug(player, state, "RESUPPLY: refill complete, teleporting back to cave")
+				logger.info("[Bot] " .. player:getName() .. " refill done, returning to cave for hunt " .. tostring(state.huntScriptId))
+				BotSystem.beginHuntPhase(player, state, HUNT_PHASE.TRAVEL_TO)
+			else
+				-- Post-hunt resupply done — re-roll for another hunt or end
+				BotSystem.castDebug(player, state, "RESUPPLY: post-hunt resupply done, re-rolling")
+				BotSystem.finishResupplyAndReroll(player, state)
+			end
 		else
 			BotSystem.castDebug(player, state, "RESUPPLY: done, ending hunt")
 			BotSystem.endHunt(player, state)
@@ -11575,10 +13812,19 @@ function BotSystem.abortHunt(player, state, reason)
 		.. " phase=" .. (state.huntPhase or "?"))
 
 	if reason and (reason:find("stuck") or reason:find("timeout")) then
+		local reportPos = player:getPosition()
+		local wps = state.huntWaypoints
+		local wpIdx = state.huntWaypointIdx
+		if wps and wpIdx and wps[wpIdx] then
+			local wp = wps[wpIdx]
+			if wp.pos_x and wp.pos_x > 0 then
+				reportPos = Position(wp.pos_x, wp.pos_y, wp.pos_z or 7)
+			end
+		end
 		BotSystem.recordImpediment(player, scriptId, scriptName, nil, "WAYPOINT_STUCK",
 			"WP #" .. tostring(state.huntWaypointIdx or 0),
 			string.format("Bot travou na hunt '%s' (fase %s): %s", scriptName, tostring(state.huntPhase or "?"), reason),
-			player:getPosition())
+			reportPos)
 	end
 
 	-- Release reservation
@@ -11602,7 +13848,14 @@ function BotSystem.abortHunt(player, state, reason)
 	end
 
 	-- Set cooldown (shorter than normal — allow retrying sooner)
-	state.huntCooldownUntil = os.time() + math.random(300, 600)
+	local cooldown = math.random(300, 600)
+	state.huntCooldownUntil = os.time() + cooldown
+
+	-- Fix 3: Blacklist this specific hunt so findHuntsForBot won't re-pick it immediately
+	state.huntBlacklist = state.huntBlacklist or {}
+	if scriptId then
+		state.huntBlacklist[scriptId] = os.time() + cooldown
+	end
 
 	-- Clear all hunt state
 	state.huntScriptId = nil
@@ -12057,7 +14310,11 @@ function BotSystem.executeMacroIntent(player, state, intent, speech, targetPlaye
 
 	if intent == "HUNT" then
 		state.followPlayerGuid = nil
-		state.huntCooldownUntil = 0
+		-- Fix 2: Don't zero the hunt cooldown — respect abort/end cooldowns to prevent retry loops.
+		-- At most, shorten to 30s so the macro feels responsive without causing instant retries.
+		if state.huntCooldownUntil and state.huntCooldownUntil > os.time() + 30 then
+			state.huntCooldownUntil = os.time() + 30
+		end
 		if state.state ~= BOT_STATE.HUNTING then
 			if not BotSystem.tryStartHunt(player, state) then
 				logger.info("[BotMacro] " .. player:getName() .. " wanted to HUNT, no eligible spawn free right now (applying backoff)")

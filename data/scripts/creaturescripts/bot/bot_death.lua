@@ -23,11 +23,19 @@ function botDeath.onDeath(player, corpse, killer, mostDamageKiller, unjustified,
 
 	logger.info("[Bot] " .. botName .. " died — AI paused, will resume in 10-180s at temple")
 
-	-- Re-apply 8 blessings upon respawn in temple so bot remains fully protected
+	-- Re-apply 8 blessings upon respawn in temple and reactivate the bot AI
 	addEvent(function()
 		local p = Player(guid)
-		if p and not p:isRemoved() and BotSystem and BotSystem.applyBotBlessings then
-			BotSystem.applyBotBlessings(p)
+		if p and not p:isRemoved() then
+			if BotSystem then
+				if BotSystem.applyBotBlessings then
+					pcall(BotSystem.applyBotBlessings, p)
+				end
+				BotPlayers[guid] = p
+				pcall(BotSystem.activateBot, p)
+				db.botAsyncQuery("INSERT IGNORE INTO `players_online` (`player_id`) VALUES (" .. guid .. ")")
+				logger.info("[Bot] " .. botName .. " respawned in temple and reactivated successfully")
+			end
 		end
 	end, 4000)
 

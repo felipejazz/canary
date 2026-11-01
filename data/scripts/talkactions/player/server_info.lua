@@ -3,11 +3,14 @@ local serverInfo = TalkAction("!serverinfo")
 function serverInfo.onSay(player, words, param)
 	local text
 	local useStages = configManager.getBoolean(configKeys.RATE_USE_STAGES)
+	local schedMult = (SCHEDULE_EXP_RATE and SCHEDULE_EXP_RATE > 0) and (SCHEDULE_EXP_RATE / 100) or 1.0
 	if not useStages then
+		local baseExp = configManager.getNumber(configKeys.RATE_EXPERIENCE) * schedMult
 		text = "Server Info Rates: \n"
 			.. "\nExp rate: "
-			.. configManager.getNumber(configKeys.RATE_EXPERIENCE)
+			.. string.format("%.2f", baseExp)
 			.. "x"
+			.. (schedMult ~= 1.0 and string.format(" (Multiplicador Global: %.2fx)", schedMult) or "")
 			.. "\nSkill rate: "
 			.. configManager.getNumber(configKeys.RATE_SKILL)
 			.. "x"
@@ -22,10 +25,12 @@ function serverInfo.onSay(player, words, param)
 			.. "x"
 	else
 		local configRateSkill = configManager.getNumber(configKeys.RATE_SKILL)
+		local stageExp = getRateFromTable(experienceStages, player:getLevel(), expstagesrate) * schedMult
 		text = "Server Info Stages Rates: \n"
 			.. "\nExp rate stages: "
-			.. getRateFromTable(experienceStages, player:getLevel(), expstagesrate)
+			.. string.format("%.2f", stageExp)
 			.. "x"
+			.. (schedMult ~= 1.0 and string.format(" (Multiplicador Global: %.2fx)", schedMult) or "")
 			.. "\nSword Skill Stages rate: "
 			.. getRateFromTable(skillsStages, player:getSkillLevel(SKILL_SWORD), configRateSkill)
 			.. "x"

@@ -6498,6 +6498,12 @@ void Player::onAttackedCreature(const std::shared_ptr<Creature> &target) {
 			sendIcons();
 		}
 
+		// Justified retaliation (target already attacked us): battle-lock only, never a skull.
+		if (!pzLocked && targetPlayer->hasAttacked(static_self_cast<Player>()) && !Combat::isInPvpZone(static_self_cast<Player>(), targetPlayer) && !isInWar(targetPlayer)) {
+			pzLocked = true;
+			sendIcons();
+		}
+
 		if (getSkull() == SKULL_NONE && getSkullClient(targetPlayer) == SKULL_YELLOW) {
 			addAttacked(targetPlayer);
 			targetPlayer->sendCreatureSkull(static_self_cast<Player>());
