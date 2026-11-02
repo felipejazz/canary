@@ -346,7 +346,11 @@ local function runAcceptPass()
 	-- per-row roll there is nothing left for an ordering to do.
 	local q = string.format(
 		"SELECT `id`, `player_id`, `sale`, `itemtype`, `amount`, `price` FROM `market_offers` " ..
-		"WHERE `player_id` NOT IN (SELECT `id` FROM `players` WHERE `account_id` = %d) LIMIT %d",
+		-- NUNCA aceitar ofertas do GOD (player_id=7): são a liquidez infinita destinada aos
+		-- players reais. Se os bots as consomem, os itens somem do Market (ex.: boots of haste,
+		-- brown mushroom ficam sem sell offer e o player não consegue comprar).
+		"WHERE `player_id` <> 7 " ..
+		"AND `player_id` NOT IN (SELECT `id` FROM `players` WHERE `account_id` = %d) LIMIT %d",
 		BotMarket.BOT_ACCOUNT_ID, BotMarket.ACCEPT_ROW_LIMIT
 	)
 	db.botAsyncStoreQuery(q, function(resultId)
