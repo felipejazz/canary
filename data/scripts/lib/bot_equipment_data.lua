@@ -105,17 +105,108 @@ function BotEquipmentData.getOptionForSlot(bracket, vocStr, slot, personality)
 	return opts[1]
 end
 
-function BotEquipmentData.getLoadout(level, baseVoc, personality, player)
+-- Melhor item do slot (rank1 = premium), ignorando personalidade.
+function BotEquipmentData.getBestOptionForSlot(bracket, vocStr, slot)
+	local opts = BotEquipmentData.options[bracket]
+		and BotEquipmentData.options[bracket][vocStr]
+		and BotEquipmentData.options[bracket][vocStr][slot]
+	if not opts or #opts == 0 then return nil end
+	return opts[1] -- ordenado por option_rank ASC no loadAll -> rank1 é o premium
+end
+
+-- Lista de opções do slot em ordem de rank (melhor -> pior), para escolha por afford­abilidade.
+function BotEquipmentData.getSlotOptions(bracket, vocStr, slot)
+	return (BotEquipmentData.options[bracket]
+		and BotEquipmentData.options[bracket][vocStr]
+		and BotEquipmentData.options[bracket][vocStr][slot]) or {}
+end
+
+-- Regra de afford­abilidade (prioriza custo-do-item vs saldo):
+--  1) se dá pra pagar o MELHOR (rank1) -> pega o melhor e IGNORA personalidade;
+--  2) senão (dinheiro é restrição) -> melhor afford­ável na ordem da personalidade;
+--  3) se nada couber -> o mais barato (slot nunca fica vazio).
+function BotEquipmentData.pickAffordableOption(bracket, vocStr, slot, personality, bank)
+	local opts = BotEquipmentData.getSlotOptions(bracket, vocStr, slot)
+	if #opts == 0 then return nil end
+	bank = bank or 0
+	local best = opts[1]
+	if best and (tonumber(best.price) or 0) <= bank then
+		return best
+	end
+	local prefs = PERSONALITY_PREFERENCES[personality or 2] or PERSONALITY_PREFERENCES[2]
+	for _, tag in ipairs(prefs) do
+		for _, opt in ipairs(opts) do
+			if opt.tag == tag and (tonumber(opt.price) or 0) <= bank then
+				return opt
+			end
+		end
+	end
+	local cheapest = opts[1]
+	for _, opt in ipairs(opts) do
+		if (tonumber(opt.price) or 0) < (tonumber(cheapest.price) or 0) then cheapest = opt end
+	end
+	return cheapest
+end
+
+-- Lista ORDENADA de candidatos p/ um slot, para o chamador tentar equipar em ordem até um funcionar
+-- (ex.: rank1 pode ser incompatível com a vocação — knight legs p/ druid — então cai p/ o próximo).
+--  forceBest: ordem de rank (melhor primeiro).
+--  afford­ável (rank1 cabe no saldo): afford­áveis em ordem de rank, depois o resto (fallback).
+--  dinheiro restrito: ordem de personalidade entre afford­áveis, depois o resto (mais barato primeiro).
+function BotEquipmentData.getOrderedCandidates(bracket, vocStr, slot, personality, bank, forceBest)
+	local opts = BotEquipmentData.getSlotOptions(bracket, vocStr, slot)
+	local list, seen = {}, {}
+	local function push(o) if o and o.item_id and o.item_id > 0 and not seen[o] then seen[o] = true; list[#list + 1] = o end end
+	if #opts == 0 then return list end
+
+	if forceBest then
+		for _, o in ipairs(opts) do push(o) end
+		return list
+	end
+
+	bank = bank or 0
+	local best = opts[1]
+	if best and (tonumber(best.price) or 0) <= bank then
+		for _, o in ipairs(opts) do if (tonumber(o.price) or 0) <= bank then push(o) end end
+		for _, o in ipairs(opts) do push(o) end
+	else
+		local prefs = PERSONALITY_PREFERENCES[personality or 2] or PERSONALITY_PREFERENCES[2]
+		for _, tag in ipairs(prefs) do
+			for _, o in ipairs(opts) do
+				if o.tag == tag and (tonumber(o.price) or 0) <= bank then push(o) end
+			end
+		end
+		local rem = {}
+		for _, o in ipairs(opts) do rem[#rem + 1] = o end
+		table.sort(rem, function(a, b) return (tonumber(a.price) or 0) < (tonumber(b.price) or 0) end)
+		for _, o in ipairs(rem) do push(o) end
+	end
+	return list
+end
+
+-- Loadout usando sempre o melhor item (rank1) por slot, mantendo as regras especiais de
+-- arma de knight (por skill) e kit de paladino (archer/spearman).
+function BotEquipmentData.getBestLoadout(level, baseVoc, player, personality)
+	return BotEquipmentData.getLoadout(level, baseVoc, personality or 2, player, function(bracket, vocStr, slot)
+		return BotEquipmentData.getBestOptionForSlot(bracket, vocStr, slot)
+	end)
+end
+
+function BotEquipmentData.getLoadout(level, baseVoc, personality, player, selector)
 	local bracket = BotEquipmentData.getBracketForLevel(level)
 	local vocStr = VOC_NAME_BY_ID[baseVoc or 4] or "knight"
 	personality = personality or 2
+	-- selector(bracket, vocStr, slot) escolhe a opção do slot; default = por personalidade
+	selector = selector or function(b, v, s)
+		return BotEquipmentData.getOptionForSlot(b, v, s, personality)
+	end
 
-	local headOpt  = BotEquipmentData.getOptionForSlot(bracket, vocStr, "head", personality)
-	local armorOpt = BotEquipmentData.getOptionForSlot(bracket, vocStr, "armor", personality)
-	local legsOpt  = BotEquipmentData.getOptionForSlot(bracket, vocStr, "legs", personality)
-	local feetOpt  = BotEquipmentData.getOptionForSlot(bracket, vocStr, "feet", personality)
-	local rightOpt = BotEquipmentData.getOptionForSlot(bracket, vocStr, "right", personality)
-	local leftOpt  = BotEquipmentData.getOptionForSlot(bracket, vocStr, "left", personality)
+	local headOpt  = selector(bracket, vocStr, "head")
+	local armorOpt = selector(bracket, vocStr, "armor")
+	local legsOpt  = selector(bracket, vocStr, "legs")
+	local feetOpt  = selector(bracket, vocStr, "feet")
+	local rightOpt = selector(bracket, vocStr, "right")
+	local leftOpt  = selector(bracket, vocStr, "left")
 	local ammoOpt  = 0
 
 	-- Knight Weapon Selection: strictly match character's highest trained skill

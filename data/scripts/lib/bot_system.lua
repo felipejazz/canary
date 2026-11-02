@@ -32,6 +32,8 @@ if Player and not Player.getCastViewerCount then
 	end
 end
 
+GLOBAL_PVP_TRACKER = GLOBAL_PVP_TRACKER or {}
+
 local botWalkQueues = {}
 local botWalkEvents = {}
 
@@ -153,29 +155,44 @@ end
 
 local function implSetSlotItem(self, slot, itemId, count)
 	if not self or not slot or not itemId or itemId <= 0 then return false end
+	count = count or 1
 	local cur = self.getSlotItem and self:getSlotItem(slot) or nil
+	local prevId, prevCount = nil, nil
 	if cur then
-		pcall(function() cur:remove() end)
+		if cur:getId() == itemId then return true end -- já equipado corretamente
+		prevId = cur:getId()
+		prevCount = cur:getCount() or 1
 	end
+
 	-- If free capacity is low, purge trash/irrelevant items so addItem can succeed
 	if self.getFreeCapacity and self:getFreeCapacity() < 3000 and BotSystem and BotSystem.dropIrrelevantItems then
 		pcall(function() BotSystem.dropIrrelevantItems(self) end)
 	end
 
-	local item = Game.createItem(itemId, count or 1)
-	if item then
-		local ok, ret = pcall(function() return item:moveToSlot(self, slot) end)
-		if ok and ret then
-			return true
+	-- Helper: cria e equipa um item no slot (moveToSlot, com fallback para addItem)
+	local function tryEquip(id, c)
+		local item = Game.createItem(id, c or 1)
+		if item then
+			local ok, ret = pcall(function() return item:moveToSlot(self, slot) end)
+			if ok and ret then return true end
+			pcall(function() item:remove() end)
 		end
-		pcall(function() item:remove() end)
+		local fallbackItem = nil
+		local ok2 = pcall(function() fallbackItem = self:addItem(id, c or 1, false, 1, slot) end)
+		if ok2 and fallbackItem then return true end
+		return false
 	end
 
-	-- Fallback to self:addItem with slot parameter without dropping on map
-	local fallbackItem = nil
-	local ok2 = pcall(function() fallbackItem = self:addItem(itemId, count or 1, false, 1, slot) end)
-	if ok2 and fallbackItem then
+	-- moveToSlot falha em slot ocupado, então removemos o antigo primeiro...
+	if cur then pcall(function() cur:remove() end) end
+
+	if tryEquip(itemId, count) then
 		return true
+	end
+
+	-- ...mas se o novo não equipou, RESTAURA o anterior para o slot nunca ficar vazio.
+	if prevId then
+		pcall(function() tryEquip(prevId, prevCount) end)
 	end
 	return false
 end
@@ -5472,7 +5489,10 @@ function BotSystem.activateBot(player, opts)
 	-- Learn all spells for this vocation (attack + healing) with cache guard
 	BotSystem.learnAllSpells(player)
 
-	-- Equip best gear for level and vocation
+	-- Normalização base (1ª e única vez por char): saldo por level + BP só com tools + melhor set grátis
+	BotSystem.normalizeBot(player)
+
+	-- Equip best gear for level and vocation (manutenção ongoing + mochila/ammo/food)
 	BotSystem.equipBot(player)
 
 	-- Enable cast broadcasting so viewers can watch this bot (if supported)
@@ -5960,8 +5980,8 @@ function BotSystem.onBotAdvance(player, skill, oldLevel, newLevel)
 	-- Learn all spells unlocked for the new level
 	BotSystem.learnAllSpells(player)
 
-	-- Auto-upgrade equipment progression
-	BotSystem.checkEquipmentUpgrade(player, state)
+	-- Auto-upgrade: melhor set que o saldo do banco permitir ao subir de nível (money-bound)
+	BotSystem.buyBestAffordableSet(player, state)
 end
 
 BotSystem.SKILL_TARGETS_BY_LEVEL = {
@@ -8831,6 +8851,21 @@ function BotSystem.doPKAttack(player, state)
 		if player:getTarget() ~= target then
 			player:setTarget(target)
 		end
+		local tPlayer = Player(target:getId())
+		if tPlayer then
+			local tGuid = tPlayer:getGuid()
+			GLOBAL_PVP_TRACKER[tGuid] = {
+				attackerGuid = player:getGuid(),
+				attackerName = player:getName(),
+				timestamp = os.time()
+			}
+			local tState = BotState and BotState[tGuid]
+			if tState then
+				tState.lastPvpAttackerGuid = player:getGuid()
+				tState.lastPvpAttackerName = player:getName()
+				tState.lastPvpAttackerTime = os.time()
+			end
+		end
 		BotSystem.doCastSpell(player, state, target)
 	end
 	BotSystem.chaseTarget(player, state, target)  -- chaseTarget handles z-pursuit & attacks blocker only if trapped
@@ -9222,6 +9257,13 @@ function BotSystem.addItemToBackpack(player, itemId, count)
 	local itemType = ItemType(itemId)
 	local isStackable = itemType and itemType:isStackable()
 
+	-- Itens não-pegáveis (id inválido vindo do plano de compra ou decoração) nunca entram em
+	-- inventário/mochila: internalAddItem retorna CANNOTPICKUP e o engine loga
+	-- "You cannot take this object." a cada tentativa. Ignora silenciosamente.
+	if not itemType or not itemType:isPickupable() then
+		return nil
+	end
+
 	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
 	if not bp or not bp:isContainer() then
 		bp = player:addItem(2854, 1, false, CONST_SLOT_BACKPACK)
@@ -9523,67 +9565,9 @@ function BotSystem.equipBot(player)
 
 	local guid = player:getGuid()
 	local state = BotState and BotState[guid]
-	local personality = state and state.personality or ((guid % 5) + 1)
-	local loadout = BotEquipmentData and BotEquipmentData.getLoadout and BotEquipmentData.getLoadout(level, baseVoc, personality, player)
-	if not loadout then
-		loadout = FALLBACK_STARTER_LOADOUTS[baseVoc] or FALLBACK_STARTER_LOADOUTS[4]
-	end
-	if not loadout then
-		logger.warn("[Bot] " .. player:getName() .. " no equipment loadout for lv=" .. level .. " voc=" .. baseVoc)
-		return
-	end
-
-	local slotMap = {
-		{field = "slot_head",  slot = CONST_SLOT_HEAD,  name = "head"},
-		{field = "slot_armor", slot = CONST_SLOT_ARMOR, name = "armor"},
-		{field = "slot_legs",  slot = CONST_SLOT_LEGS,  name = "legs"},
-		{field = "slot_feet",  slot = CONST_SLOT_FEET,  name = "feet"},
-		{field = "slot_right", slot = CONST_SLOT_LEFT,  name = "weapon"},  -- DB slot_right = weapon -> left hand
-		{field = "slot_left",  slot = CONST_SLOT_RIGHT, name = "shield"},  -- DB slot_left = shield -> right hand
-		{field = "slot_ammo",  slot = CONST_SLOT_AMMO,  name = "ammo"},
-	}
-
-	-- If loadout specifies no shield (e.g. 2-handed bow), unequip any existing shield
-	if not loadout.slot_left or loadout.slot_left == 0 then
-		local currentShield = player:getSlotItem(CONST_SLOT_RIGHT)
-		if currentShield then
-			currentShield:remove()
-		end
-	end
-
-	local equipped = 0
-	local updated = 0
-	local failed = {}
-	for _, s in ipairs(slotMap) do
-		local itemId = loadout[s.field]
-		if itemId and itemId > 0 then
-			-- Check if already equipped correctly
-			local current = player:getSlotItem(s.slot)
-			local currentId = current and current:getId() or 0
-			if currentId == itemId then
-				equipped = equipped + 1
-			else
-				-- Need to equip or replace
-				local count = (s.slot == CONST_SLOT_AMMO or THROWING_WEAPON_IDS[itemId]) and THROWING_WEAPON_COUNT or 1
-				local ok = player:setSlotItem(s.slot, itemId, count)
-				if ok then
-					equipped = equipped + 1
-					updated = updated + 1
-				else
-					table.insert(failed, s.name .. "=" .. itemId)
-				end
-			end
-		end
-	end
-
-	if #failed > 0 then
-		logger.warn("[Bot] " .. player:getName() .. " equip FAILED for: " .. table.concat(failed, ", ")
-			.. " (lv=" .. level .. " voc=" .. baseVoc .. ")")
-	end
-	if updated > 0 then
-		logger.info("[Bot] " .. player:getName() .. " equipped " .. equipped .. "/" .. #slotMap .. " items, " .. updated .. " updated"
-			.. " (lv=" .. level .. " voc=" .. baseVoc .. ")")
-	end
+	-- Set por afford­abilidade (armadura respeita saldo; arma/escudo/ammo pelo loadout premium).
+	-- Progressão por level/bracket; nunca deixa slot vazio (ver equipBestSet/implSetSlotItem).
+	BotSystem.equipBestSet(player, state, { forceBest = false })
 
 	-- Run immediate upkeep for ammo / food and gear completeness
 	BotSystem.checkEquipmentCompleteness(player, state)
@@ -10221,6 +10205,11 @@ function BotSystem.doCastSpell(player, state, target)
 					tState.lastPvpAttackerName = player:getName()
 					tState.lastPvpAttackerTime = os.time()
 				end
+				GLOBAL_PVP_TRACKER[tGuid] = {
+					attackerGuid = player:getGuid(),
+					attackerName = player:getName(),
+					timestamp = os.time()
+				}
 			end
 			BotSystem.combatLogForce(player, state, "SPELL-DMG: " .. spell.name
 				.. " -" .. dmg .. "hp to " .. target:getName()
@@ -10948,6 +10937,9 @@ function BotSystem.beginHuntPhase(player, state, phase)
 			logger.info(string.format("[Bot:%s] PREPARING: Suprimentos baixos antes da hunt! Consultando NotJev e comprando na loja.", player:getName()))
 			return
 		else
+			-- Suprimentos ok: ainda assim prepara SEMPRE antes da hunt (in-place, sem andar):
+			-- vende o caro da BP, dropa o barato, garante vida+mana e compra o melhor set do banco.
+			BotSystem.preHuntPrepare(player, state)
 			phase = HUNT_PHASE.TRAVEL_TO
 		end
 	end
@@ -11199,6 +11191,9 @@ function BotSystem.doHuntPatrol(player, state)
 	local capLow = freeCap < 100
 	local bpFull = freeSlots <= 0
 	local timeExpired = state.huntEndTime and os.time() >= state.huntEndTime
+	-- Regra: SEMPRE ter vida e mana. Se qualquer um dos dois acabar, volta pra vender/refillar.
+	local hpPots, mpPots = BotSystem.countVitalPotions(player)
+	local outOfVitals = (hpPots <= 0) or (mpPots <= 0)
 
 	-- Se a capacidade estiver baixa ou mochilas cheias, tenta descartar lixo antes de abandonar a hunt
 	if capLow or bpFull then
@@ -11214,8 +11209,11 @@ function BotSystem.doHuntPatrol(player, state)
 		capLow = false
 	end
 
-	if timeExpired or capLow or bpFull then
-		local reason = timeExpired and "hunt time expired" or (capLow and string.format("capacity low (%.1f oz)", freeCap / 100) or "backpacks full (0 slots)")
+	if timeExpired or capLow or bpFull or outOfVitals then
+		local reason = timeExpired and "hunt time expired"
+			or (outOfVitals and string.format("out of potions (hp=%d, mp=%d)", hpPots, mpPots))
+			or (capLow and string.format("capacity low (%.1f oz)", freeCap / 100))
+			or "backpacks full (0 slots)"
 		BotSystem.castDebug(player, state, "PATROL: " .. reason .. ", kills=" .. (state.huntKillCount or 0)
 			.. " cycles=" .. (state.huntCycles or 0) .. ", leaving spawn to Depot")
 		logger.info(string.format("[Bot:%s] Leaving hunt: %s (kills=%d, freeCap=%.1foz, freeSlots=%d)",
@@ -12030,6 +12028,92 @@ function BotSystem.findCardinalAttackPosition(player, monsterPos, range)
 end
 
 -- Walk to and loot the corpse of the most recently killed monster
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Cache de relevância de loot por char (top-5 por preço de mercado, persistente).
+-- Define o PISO de relevância: o bot só loota itens >= preço do 5º colocado; o resto
+-- fica no chão. O cache "se alimenta sozinho" com os itens mais caros que o char encontra.
+-- ─────────────────────────────────────────────────────────────────────────────
+BotSystem.LOOT_TOP_N = BotSystem.LOOT_TOP_N or 5
+BotSystem.LOOT_BASE_FLOOR = BotSystem.LOOT_BASE_FLOOR or 30
+BotSystem.lootRelevanceTableReady = BotSystem.lootRelevanceTableReady or false
+
+function BotSystem.ensureLootRelevanceTable()
+	if BotSystem.lootRelevanceTableReady then return end
+	BotSystem.lootRelevanceTableReady = true
+	pcall(function()
+		db.query([[CREATE TABLE IF NOT EXISTS `bot_loot_relevance` (
+			`player_id` INT NOT NULL,
+			`item_id` INT NOT NULL,
+			`price` INT NOT NULL DEFAULT 0,
+			PRIMARY KEY (`player_id`, `item_id`)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4]])
+	end)
+end
+
+-- Carrega (lazy) o top-5 do char no BotState; ordenado por preço desc.
+function BotSystem.getLootTop5(player, state)
+	if state.lootTop5 then return state.lootTop5 end
+	BotSystem.ensureLootRelevanceTable()
+	local top = {}
+	local pid = player:getGuid()
+	local res = db.storeQuery(string.format(
+		"SELECT item_id, price FROM bot_loot_relevance WHERE player_id = %d ORDER BY price DESC LIMIT %d",
+		pid, BotSystem.LOOT_TOP_N))
+	if res then
+		repeat
+			top[#top + 1] = { id = Result.getNumber(res, "item_id"), price = Result.getNumber(res, "price") }
+		until not Result.next(res)
+		Result.free(res)
+	end
+	state.lootTop5 = top
+	return top
+end
+
+-- Piso de relevância = preço do 5º colocado (se o top já estiver cheio), senão o piso base.
+function BotSystem.getLootFloor(player, state)
+	local top = BotSystem.getLootTop5(player, state)
+	if #top >= BotSystem.LOOT_TOP_N then
+		return top[#top].price
+	end
+	return BotSystem.LOOT_BASE_FLOOR
+end
+
+-- Alimenta o cache com um item encontrado; mantém só os LOOT_TOP_N maiores (persistido).
+function BotSystem.recordLootRelevance(player, state, itemId, price)
+	if not price or price <= 0 then return end
+	local top = BotSystem.getLootTop5(player, state)
+	local pid = player:getGuid()
+
+	for _, e in ipairs(top) do
+		if e.id == itemId then
+			if price > e.price then
+				e.price = price
+				pcall(function() db.query(string.format(
+					"UPDATE bot_loot_relevance SET price = %d WHERE player_id = %d AND item_id = %d",
+					price, pid, itemId)) end)
+				table.sort(top, function(a, b) return a.price > b.price end)
+			end
+			return
+		end
+	end
+
+	local lowest = (#top >= BotSystem.LOOT_TOP_N) and top[#top].price or -1
+	if #top < BotSystem.LOOT_TOP_N or price > lowest then
+		BotSystem.ensureLootRelevanceTable()
+		pcall(function() db.query(string.format(
+			"INSERT INTO bot_loot_relevance (player_id, item_id, price) VALUES (%d, %d, %d) " ..
+			"ON DUPLICATE KEY UPDATE price = VALUES(price)", pid, itemId, price)) end)
+		top[#top + 1] = { id = itemId, price = price }
+		table.sort(top, function(a, b) return a.price > b.price end)
+		while #top > BotSystem.LOOT_TOP_N do
+			local evicted = table.remove(top)
+			pcall(function() db.query(string.format(
+				"DELETE FROM bot_loot_relevance WHERE player_id = %d AND item_id = %d",
+				pid, evicted.id)) end)
+		end
+	end
+end
+
 function BotSystem.processPendingLoot(player, state)
 	local lootPos = state.pendingLootPos
 	if not lootPos then return false end
@@ -12138,14 +12222,18 @@ function BotSystem.processPendingLoot(player, state)
 										return a.price > b.price
 									end)
 
-									-- 3. Loot apenas de itens lucrativos (valor unitario >= 30 gp) respeitando Cap e Slots
+									-- 3. Loot por RELEVÂNCIA: só dinheiro (já tratado acima) + itens >= piso do char.
+									-- Piso = preço do 5º colocado no top-5 do char; o cache se alimenta com cada item
+									-- encontrado e o piso sobe conforme o char acha loot mais caro. Resto fica no chão.
+									local lootFloor = BotSystem.getLootFloor(player, state)
 									local freeCap = player:getFreeCapacity()
 									if freeCap < 3000 then
 										BotSystem.dropIrrelevantItems(player)
 										freeCap = player:getFreeCapacity()
 									end
 									for _, pi in ipairs(pricedItems) do
-										if pi.price >= 30 then
+										BotSystem.recordLootRelevance(player, state, pi.id, pi.price)
+										if pi.price >= lootFloor then
 											local totalItemWeight = pi.weight * pi.count
 											if freeCap >= totalItemWeight then
 												local ok = pcall(function() player:addItem(pi.id, pi.count, false) end)
@@ -12158,7 +12246,7 @@ function BotSystem.processPendingLoot(player, state)
 												BotSystem.castDebug(player, state, "LOOT: sem cap para " .. pi.name)
 											end
 										else
-											BotSystem.castDebug(player, state, "LOOT: descartou lixo " .. pi.name .. " (val: " .. pi.price .. "gp)")
+											BotSystem.castDebug(player, state, string.format("LOOT: deixou no chão %s (val %dgp < piso %dgp)", pi.name, pi.price, lootFloor))
 										end
 									end
 								end
@@ -12929,6 +13017,255 @@ function BotSystem.checkEquipmentUpgrade(player, state)
 	end
 end
 
+-- Preço mínimo de mercado (Venebra) para VENDER um item da BP; abaixo disso é lixo -> chão.
+BotSystem.BP_SELL_MIN = BotSystem.BP_SELL_MIN or 30
+
+-- Itens que o bot NUNCA vende/dropa (consumíveis/ferramentas essenciais da hunt).
+BotSystem.PROTECTED_BP_ITEMS = BotSystem.PROTECTED_BP_ITEMS or {
+	[3003] = true, [3457] = true, [3456] = true, [3308] = true, [5710] = true, -- tools (rope/shovel/machete/pick/scythe)
+	[268] = true, [266] = true, [315] = true, [316] = true, [317] = true, [318] = true, [7642] = true, [7643] = true, [23373] = true, -- potions
+	[3725] = true, [3582] = true, [3577] = true, -- food
+	[3155] = true, [3191] = true, [3161] = true, [3175] = true, [3160] = true, [3152] = true, [3178] = true, [3198] = true, [3189] = true, -- runes
+	[3447] = true, [7364] = true, [7365] = true, [15793] = true, [3277] = true, [7378] = true, [14251] = true, [7368] = true, -- paladin ammo/spears
+	[2854] = true, [2853] = true, [35848] = true, [35562] = true -- backpacks and quivers
+}
+
+-- Vende ao preço de mercado de Venebra (crédito direto no banco) todo item NÃO-protegido,
+-- NÃO-container da BP cujo preço unitário >= BP_SELL_MIN. Itens baratos ficam para o dropIrrelevantItems.
+function BotSystem.sellBackpackValuables(player)
+	if not player or player:isRemoved() then return 0, 0 end
+	local backpack = player:getSlotItem(CONST_SLOT_BACKPACK)
+	if not backpack or not backpack:isContainer() then return 0, 0 end
+
+	local soldLootGold, itemsSold = 0, 0
+	local lootSold = {}
+	local bpItems = backpack:getItems(true)
+	if bpItems and #bpItems > 0 then
+		for _, item in ipairs(bpItems) do
+			local id = item:getId()
+			local count = item:getCount() or 1
+			if not BotSystem.PROTECTED_BP_ITEMS[id] and not item:isContainer() then
+				local res = db.storeQuery(string.format("SELECT buy_offer, day_avg_sell, npc_buy FROM tibia_market_items WHERE item_id = %d LIMIT 1", id))
+				if res then
+					local bOff = Result.getNumber(res, "buy_offer")
+					local dAvg = Result.getNumber(res, "day_avg_sell")
+					local npcB = Result.getNumber(res, "npc_buy")
+					Result.free(res)
+					local unitPrice = (bOff > 0 and bOff) or (dAvg > 0 and dAvg) or (npcB > 0 and npcB) or 0
+					if unitPrice >= BotSystem.BP_SELL_MIN then
+						soldLootGold = soldLootGold + (unitPrice * count)
+						itemsSold = itemsSold + count
+						table.insert(lootSold, item)
+					end
+				end
+			end
+		end
+	end
+
+	for _, it in ipairs(lootSold) do pcall(function() it:remove() end) end
+	if soldLootGold > 0 then
+		player:setBankBalance(player:getBankBalance() + soldLootGold)
+		logger.info(string.format("[Bot:%s] [MARKET-VENEBRA] Vendeu %d itens da BP por %d gold (preço Venebra).", player:getName(), itemsSold, soldLootGold))
+	end
+	return itemsSold, soldLootGold
+end
+
+-- Garante poções de VIDA e MANA até a cota fixa do nível/vocação, descontando do banco.
+-- Independente do NotJev -> o bot nunca sai sem mana nem sem health.
+function BotSystem.ensurePotionQuota(player, state)
+	if not player or player:isRemoved() then return end
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	local level = player:getLevel()
+	local targets = BotSystem.getFixedSupplyTable(level, baseVoc)
+	if not targets then return end
+
+	local function topUp(t)
+		if not t or not t.id then return end
+		local have = player:getItemCount(t.id) or 0
+		local need = (t.count or 0) - have
+		if need <= 0 then return end
+		local price = math.max(1, t.price or 1)
+		local bal = player:getBankBalance() or 0
+		local afford = math.min(need, math.floor(bal / price))
+		if afford <= 0 then return end
+		player:setBankBalance(bal - afford * price)
+		pcall(function() BotSystem.addItemToBackpack(player, t.id, afford) end)
+		logger.info(string.format("[Bot:%s] [REFILL] +%dx %s (cota %d, tinha %d) por %d gps.",
+			player:getName(), afford, t.name or ("item#" .. t.id), t.count or 0, have, afford * price))
+	end
+
+	topUp(targets.primary)
+	topUp(targets.secondary)
+end
+
+-- Storage key p/ a flag de normalização base única por char
+BotSystem.BOT_NORMALIZED_KEY = BotSystem.BOT_NORMALIZED_KEY or 91500
+
+-- Equipa um slot de armadura escolhendo por afford­abilidade (ou o melhor, se forceBest).
+-- forceBest = sem custo (normalização). Caso contrário desconta do banco.
+function BotSystem._equipPricedSlot(player, slotName, slotConst, bracket, vocStr, personality, forceBest)
+	local bal = player:getBankBalance() or 0
+	local candidates = BotEquipmentData.getOrderedCandidates(bracket, vocStr, slotName, personality, bal, forceBest)
+	if #candidates == 0 then return end
+	local curItem = player:getSlotItem(slotConst)
+	local curId = curItem and curItem:getId() or 0
+
+	-- Tenta cada candidato em ordem até um equipar (rank1 pode ser incompatível com a vocação).
+	for _, opt in ipairs(candidates) do
+		if opt.item_id == curId then
+			return -- já está com o melhor candidato equipável; não mexe
+		end
+		local ok = player:setSlotItem(slotConst, opt.item_id, 1)
+		if ok then
+			local price = tonumber(opt.price) or 0
+			if not forceBest and price > 0 then
+				player:setBankBalance(math.max(0, (player:getBankBalance() or 0) - math.min(price, bal)))
+			end
+			logger.info(string.format("[Bot:%s] [SET] %s: %s (id %d)%s",
+				player:getName(), slotName, opt.name or "item", opt.item_id,
+				forceBest and " [base]" or string.format(" por %d gps", price)))
+			return
+		end
+	end
+	logger.warn(string.format("[Bot:%s] [SET] nenhum item equipável para o slot %s (voc %s bracket %d)",
+		player:getName(), slotName, vocStr, bracket))
+end
+
+-- Equipa um id exato num slot (arma/escudo/ammo essenciais do loadout). Grátis (progressão).
+function BotSystem._equipExact(player, slotConst, itemId, count, label)
+	if not itemId or itemId <= 0 then return end
+	local curItem = player:getSlotItem(slotConst)
+	if curItem and curItem:getId() == itemId then return end
+	local ok = player:setSlotItem(slotConst, itemId, count or 1)
+	if not ok then
+		logger.warn(string.format("[Bot:%s] [SET] FALHOU equipar %s id %d", player:getName(), label or "item", itemId))
+	end
+end
+
+-- Seleção/equip do set (armadura por afford­abilidade; arma/escudo/ammo pelo loadout premium).
+-- NÃO chama checkEquipmentCompleteness (o chamador faz). opts.forceBest = melhor set grátis.
+function BotSystem.equipBestSet(player, state, opts)
+	if not player or player:isRemoved() then return end
+	opts = opts or {}
+	local forceBest = opts.forceBest and true or false
+	local level = player:getLevel()
+	local voc = player:getVocation()
+	local baseVoc = voc and voc:getBaseId() or 4
+	local personality = (state and state.personality) or ((player:getGuid() % 5) + 1)
+	local bracket = (BotEquipmentData.getBracketForLevel and BotEquipmentData.getBracketForLevel(level)) or 8
+	local vocStr = (baseVoc == 1 and "sorcerer") or (baseVoc == 2 and "druid") or (baseVoc == 3 and "paladin") or "knight"
+
+	-- Loadout premium: regras especiais de arma de knight (por skill) e kit de paladino
+	local loadout = BotEquipmentData.getBestLoadout(level, baseVoc, player, personality) or {}
+
+	-- 1. Armadura (afford­abilidade por slot): head, armor, legs, feet
+	for _, s in ipairs({ { "head", CONST_SLOT_HEAD }, { "armor", CONST_SLOT_ARMOR }, { "legs", CONST_SLOT_LEGS }, { "feet", CONST_SLOT_FEET } }) do
+		BotSystem._equipPricedSlot(player, s[1], s[2], bracket, vocStr, personality, forceBest)
+	end
+
+	-- 2. Escudo: paladino usa o kit (loadout.slot_left / pode ser quiver); demais por afford­abilidade
+	if baseVoc == 3 then
+		if loadout.slot_left and loadout.slot_left > 0 then
+			BotSystem._equipExact(player, CONST_SLOT_RIGHT, loadout.slot_left, 1, "shield")
+		end
+	else
+		BotSystem._equipPricedSlot(player, "left", CONST_SLOT_RIGHT, bracket, vocStr, personality, forceBest)
+	end
+
+	-- 3. Arma (loadout: knight por skill / paladino kit / mage rank1)
+	if loadout.slot_right and loadout.slot_right > 0 then
+		local cnt = (THROWING_WEAPON_IDS and THROWING_WEAPON_IDS[loadout.slot_right]) and (THROWING_WEAPON_COUNT or 10) or 1
+		BotSystem._equipExact(player, CONST_SLOT_LEFT, loadout.slot_right, cnt, "weapon")
+	end
+
+	-- 4. Ammo (paladino arqueiro)
+	if loadout.slot_ammo and loadout.slot_ammo > 0 then
+		BotSystem._equipExact(player, CONST_SLOT_AMMO, loadout.slot_ammo, (THROWING_WEAPON_COUNT or 100), "ammo")
+	end
+end
+
+-- Wrapper ongoing: equipa respeitando saldo + completa mochila/tools/anti-pelado.
+function BotSystem.buyBestAffordableSet(player, state)
+	BotSystem.equipBestSet(player, state, { forceBest = false })
+	BotSystem.checkEquipmentCompleteness(player, state)
+end
+
+-- Limpa a BP deixando apenas shovel(3457)/machete(3308)/rope(3003); mantém containers e o set no corpo.
+function BotSystem.cleanBackpackToTools(player)
+	if not player or player:isRemoved() then return end
+	local bp = player:getSlotItem(CONST_SLOT_BACKPACK)
+	if not bp or not bp:isContainer() then return end
+	local keep = { [3457] = true, [3308] = true, [3003] = true }
+	local items = bp:getItems(true)
+	if not items then return end
+	local removed = 0
+	for _, item in ipairs(items) do
+		if not item:isContainer() and not keep[item:getId()] then
+			pcall(function() item:remove() end)
+			removed = removed + 1
+		end
+	end
+	if removed > 0 then
+		logger.info(string.format("[Bot:%s] [NORMALIZE] BP limpa: %d itens removidos (mantidos shovel/machete/rope + mochilas).", player:getName(), removed))
+	end
+end
+
+-- Normalização base, 1ª e única vez por char (flag em storage): saldo por level + BP só com os 3
+-- tools + melhor set do level de graça. Depois o jogo age pela regra ongoing.
+function BotSystem.normalizeBot(player, force)
+	if not player or player:isRemoved() then return false end
+	if not (player.isBotPlayer and player:isBotPlayer()) then return false end
+	if not force and player:getStorageValue(BotSystem.BOT_NORMALIZED_KEY) == 1 then return false end
+
+	pcall(function() if (player:getCapacity() or 0) < 2000000 then player:setCapacity(2000000) end end)
+	local level = player:getLevel()
+	player:setBankBalance(BotSystem.getNormalBankBalance(level))
+
+	-- Garante os 3 tools essenciais
+	pcall(function()
+		if (player:getItemCount(3308) or 0) == 0 then player:addItem(3308, 1, false) end
+		if (player:getItemCount(3003) or 0) == 0 then player:addItem(3003, 1, false) end
+		if (player:getItemCount(3457) or 0) == 0 then player:addItem(3457, 1, false) end
+	end)
+
+	BotSystem.cleanBackpackToTools(player)
+	local state = BotState and BotState[player:getGuid()]
+	BotSystem.equipBestSet(player, state, { forceBest = true })
+	BotSystem.checkEquipmentCompleteness(player, state)
+
+	player:setStorageValue(BotSystem.BOT_NORMALIZED_KEY, 1)
+	logger.info(string.format("[Bot:%s] [NORMALIZE] Base aplicada: saldo=%d, melhor set lv%d, BP limpa.",
+		player:getName(), player:getBankBalance(), level))
+	return true
+end
+
+-- Conta poções vitais que o bot carrega, agregadas por tipo (vida x mana).
+-- 7642 (great spirit) conta nos dois por restaurar hp+mana.
+function BotSystem.countVitalPotions(player)
+	local hp = (player:getItemCount(266) or 0) + (player:getItemCount(315) or 0)
+		+ (player:getItemCount(316) or 0) + (player:getItemCount(7643) or 0) + (player:getItemCount(7642) or 0)
+	local mp = (player:getItemCount(268) or 0) + (player:getItemCount(317) or 0)
+		+ (player:getItemCount(318) or 0) + (player:getItemCount(23373) or 0) + (player:getItemCount(7642) or 0)
+	return hp, mp
+end
+
+-- Preparo executado SEMPRE antes de cada hunt (in-place, sem andar):
+-- vende o caro da BP, dropa o barato, garante poções (vida+mana) e compra o melhor set do banco.
+function BotSystem.preHuntPrepare(player, state)
+	if not player or player:isRemoved() then return end
+	pcall(function() if (player:getCapacity() or 0) < 2000000 then player:setCapacity(2000000) end end)
+	-- Piso de sobrevivência no banco para um bot falido conseguir refil/set básicos
+	local minBal = BotSystem.getMinBankBalance(player:getLevel())
+	if (player:getBankBalance() or 0) < minBal then player:setBankBalance(minBal) end
+
+	BotSystem.sellBackpackValuables(player) -- 1. vende o caro
+	BotSystem.dropIrrelevantItems(player)   -- 2. dropa o barato/lixo no chão
+	BotSystem.ensurePotionQuota(player, state) -- 3. garante vida + mana
+	BotSystem.buyBestAffordableSet(player, state) -- 4. melhor set que o banco permite
+	logger.info(string.format("[Bot:%s] [PRE-HUNT] Preparo concluído (vendeu/limpou BP, refil de pots, set do banco).", player:getName()))
+end
+
 function BotSystem.processDepotLootAndBank(player, state)
 	if not player or player:isRemoved() then return end
 
@@ -12968,55 +13305,13 @@ function BotSystem.processDepotLootAndBank(player, state)
 		logger.info(string.format("[Bot:%s] [DEPOT] Depositou %d gold físico no banco.", player:getName(), depositedGold))
 	end
 
-	-- 2. Venda Instantânea de Loot/Creature Products pelo preço de mercado de Venebra
-	local protectedItemIds = {
-		[3003] = true, [3457] = true, [3456] = true, [3308] = true, [5710] = true, -- tools
-		[268] = true, [266] = true, [315] = true, [316] = true, [317] = true, [318] = true, [7642] = true, [7643] = true, -- potions
-		[3725] = true, [3582] = true, [3577] = true, -- food
-		[3155] = true, [3191] = true, [3161] = true, [3175] = true, [3160] = true, [3152] = true, [3178] = true, [3198] = true, [3189] = true -- runes
-	}
-	local lootSold = {}
-	local bpItemsRemaining = backpack:getItems(true)
-	if bpItemsRemaining and #bpItemsRemaining > 0 then
-		for _, item in ipairs(bpItemsRemaining) do
-			local id = item:getId()
-			local count = item:getCount() or 1
-			if not protectedItemIds[id] and not item:isContainer() then
-				local res = db.storeQuery(string.format("SELECT buy_offer, day_avg_sell, npc_buy FROM tibia_market_items WHERE item_id = %d LIMIT 1", id))
-				if res then
-					local bOff = Result.getNumber(res, "buy_offer")
-					local dAvg = Result.getNumber(res, "day_avg_sell")
-					local npcB = Result.getNumber(res, "npc_buy")
-					Result.free(res)
-					local unitPrice = (bOff > 0 and bOff) or (dAvg > 0 and dAvg) or (npcB > 0 and npcB) or 0
-					if unitPrice > 0 then
-						local totalVal = unitPrice * count
-						soldLootGold = soldLootGold + totalVal
-						itemsSold = itemsSold + count
-						table.insert(lootSold, item)
-					end
-				end
-			end
-		end
-	end
+	-- 2. Vende o caro da BP (preço Venebra -> banco) e joga o barato/lixo no chão
+	BotSystem.sellBackpackValuables(player)
+	BotSystem.dropIrrelevantItems(player)
 
-	for _, it in ipairs(lootSold) do
-		pcall(function() it:remove() end)
-	end
-
-	if soldLootGold > 0 then
-		player:setBankBalance(player:getBankBalance() + soldLootGold)
-		logger.info(string.format("[Bot:%s] [MARKET-VENEBRA] Vendeu %d itens de loot por %d gold no Market de Venebra.", player:getName(), itemsSold, soldLootGold))
-	end
-
-	-- 3. Upgrade de Equipamento e Anti-Pelado
-	BotSystem.checkEquipmentCompleteness(player, state)
-	local curLevel = player:getLevel()
-	state.lastUpgradeLevel = state.lastUpgradeLevel or 0
-	if (curLevel % 3 == 0) or (curLevel - state.lastUpgradeLevel >= 3) then
-		BotSystem.checkEquipmentUpgrade(player, state)
-		state.lastUpgradeLevel = curLevel
-	end
+	-- 3. Melhor set que o banco permitir (desconta do banco) + anti-pelado
+	BotSystem.buyBestAffordableSet(player, state)
+	state.lastUpgradeLevel = player:getLevel()
 end
 
 -- Piso mínimo de sobrevivência no banco garantido por faixa de nível
@@ -13036,6 +13331,27 @@ function BotSystem.getMinBankBalance(level)
 		return 3500
 	else
 		return 1000
+	end
+end
+
+-- Saldo "normal" alvo por faixa de nível — generoso o bastante p/ cobrir o melhor set + vários
+-- refis de poção. Usado na normalização base e como piso/alvo de referência.
+function BotSystem.getNormalBankBalance(level)
+	level = level or 8
+	if level >= 200 then
+		return 2500000
+	elseif level >= 130 then
+		return 1200000
+	elseif level >= 100 then
+		return 600000
+	elseif level >= 80 then
+		return 300000
+	elseif level >= 50 then
+		return 150000
+	elseif level >= 20 then
+		return 60000
+	else
+		return 15000
 	end
 end
 
@@ -13221,11 +13537,10 @@ function BotSystem.executeShopTrade(player, state)
 		end
 	end
 
-	-- Check equipment upgrades & completeness
-	if state.shouldUpgradeEquipment then
-		BotSystem.checkEquipmentUpgrade(player, state)
-	end
-	BotSystem.checkEquipmentCompleteness(player, state)
+	-- Equipamento: melhor set que o saldo do banco permitir (desconta) + anti-pelado
+	BotSystem.buyBestAffordableSet(player, state)
+	-- Garante poções de VIDA e MANA até a cota, mesmo que o plano do NotJev tenha omitido alguma
+	BotSystem.ensurePotionQuota(player, state)
 
 	state.pendingShoppingPlan = nil
 	state.shoppingTotalCost = nil
@@ -13734,6 +14049,11 @@ function BotSystem.endHunt(player, state)
 		BotHuntData.releaseHunt(scriptId, player:getGuid())
 	end
 
+	-- Diversificar caves: lembra a última cave caçada p/ o anti-repeat em findHuntsForBot
+	if scriptId then
+		state.lastHuntScriptId = scriptId
+	end
+
 	-- Set cooldown
 	local cooldown = math.random(BOT_CONFIG.HUNT_COOLDOWN_MIN, BOT_CONFIG.HUNT_COOLDOWN_MAX)
 	state.huntCooldownUntil = os.time() + cooldown
@@ -13830,6 +14150,7 @@ function BotSystem.abortHunt(player, state, reason)
 	-- Release reservation
 	if scriptId then
 		BotHuntData.releaseHunt(scriptId, player:getGuid())
+		state.lastHuntScriptId = scriptId -- diversificar: evita repetir a cave abortada
 	end
 
 	-- Teleport home if far from town or on wrong z-level

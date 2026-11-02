@@ -526,6 +526,23 @@ function BotDispute.beginCombat(session, reason)
 					state.lastAttackTime = 0
 					state.lastCombatProgress = now()
 					p:setTarget(target)
+
+					local tPlayer = Player(target:getId())
+					if tPlayer then
+						local tGuid = tPlayer:getGuid()
+						GLOBAL_PVP_TRACKER = GLOBAL_PVP_TRACKER or {}
+						GLOBAL_PVP_TRACKER[tGuid] = {
+							attackerGuid = part.guid,
+							attackerName = part.name,
+							timestamp = now()
+						}
+						local tState = BotState and BotState[tGuid]
+						if tState then
+							tState.lastPvpAttackerGuid = part.guid
+							tState.lastPvpAttackerName = part.name
+							tState.lastPvpAttackerTime = now()
+						end
+					end
 				end
 			end
 		end

@@ -251,18 +251,20 @@ Blessings.BuyAllBlesses = function(player)
 		return true
 	end
 
-	donthavefilter = function(p, b)
+	-- !bless compra apenas as 5 bênçãos REGULARES de losscount (ids 2-6) + Twist of Fate.
+	-- As enhanced (Heart/Blood of the Mountain, ids 7-8) são caras e compradas à parte (charm/altar);
+	-- incluí-las aqui inflava o custo e, como removeMoneyBank é tudo-ou-nada, deixava o jogador SEM
+	-- nenhuma bênção quando não cobria o total -- morrendo "com bless" e perdendo itens mesmo assim.
+	local regularFilter = function(b)
+		return b.losscount and b.type == Blessings.Types.REGULAR
+	end
+	local donthavefilter = function(p, b)
 		return not p:hasBlessing(b)
 	end
 
-	local hasToF = not Blessings.Config.HasToF or player:hasBlessing(1)
-	local missingBless = player:getBlessings(nil, donthavefilter)
-	local missingBlessAmt = #missingBless + (hasToF and 0 or 1)
-	local totalCost = 0
-
-	for _, bless in ipairs(missingBless) do
-		totalCost = totalCost + Blessings.getBlessingCost(player:getLevel(), true, bless.id >= 7)
-	end
+	local needToF = Blessings.Config.HasToF and not player:hasBlessing(1)
+	local missingBless = player:getBlessings(regularFilter, donthavefilter)
+	local missingBlessAmt = #missingBless + (needToF and 1 or 0)
 
 	if missingBlessAmt == 0 then
 		player:sendCancelMessage("You are already blessed.")
@@ -270,7 +272,12 @@ Blessings.BuyAllBlesses = function(player)
 		return true
 	end
 
-	if not hasToF then
+	local totalCost = 0
+	for _ in ipairs(missingBless) do
+		totalCost = totalCost + Blessings.getBlessingCost(player:getLevel(), true, false)
+	end
+
+	if needToF then
 		totalCost = totalCost + Blessings.getPvpBlessingCost(player:getLevel(), true)
 	end
 
@@ -283,6 +290,10 @@ Blessings.BuyAllBlesses = function(player)
 		for _, bless in ipairs(missingBless) do
 			player:addBlessing(bless.id, 1)
 		end
+		if needToF then
+			-- A Twist of Fate é cobrada acima; sem este addBlessing ela era paga mas nunca concedida.
+			player:addBlessing(1, 1)
+		end
 
 		player:sendCancelMessage(string.format("You received the remaining %d blesses for a total of %d gold.", missingBlessAmt, totalCost))
 		player:getPosition():sendMagicEffect(CONST_ME_HOLYAREA)
@@ -291,6 +302,7 @@ Blessings.BuyAllBlesses = function(player)
 		player:getPosition():sendMagicEffect(CONST_ME_POFF)
 	end
 
+	player:sendBlessStatus()
 	return true
 end
 

@@ -599,6 +599,23 @@ function BotHuntData.findHuntsForBot(player, botData, archetype, state)
 							end
 						end
 
+						-- 5. Fator de level: penaliza caves baixas demais p/ o nível do bot (ex.: lvl40 em
+						-- rotworm min 8) e caves já passadas (level > max_level), empurrando para a faixa
+						-- do bot. Com o desempate aleatório abaixo, diversifica entre caves adequadas.
+						local FIT_MARGIN = 15
+						local LVL_PENALTY = 12
+						local gap = level - (script.min_level or 0)
+						if gap > FIT_MARGIN then
+							preference = preference - (gap - FIT_MARGIN) * LVL_PENALTY
+						end
+						if script.max_level and level > script.max_level then
+							preference = preference - (level - script.max_level) * LVL_PENALTY
+						end
+						-- Diversificar: evita repetir imediatamente a última cave caçada
+						if state and state.lastHuntScriptId and state.lastHuntScriptId == scriptId then
+							preference = preference - 40
+						end
+
 						eligible[#eligible + 1] = {
 							scriptId = scriptId,
 							script = script,

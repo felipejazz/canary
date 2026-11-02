@@ -206,14 +206,80 @@ function playerDeath.onDeath(player, corpse, killer, mostDamageKiller, unjustifi
 
 	local killerName, byPlayer = getKillerInfo(killer)
 	local mostDamageName, byPlayerMostDamage = getMostDamageInfo(mostDamageKiller)
+	local playerGuid = player:getGuid()
+
+	-- Detecção e Atribuição Robusta de Mortes PvP (Bypass PvP de Bots, Duelos e Disputas de Cave)
+	local pvpKillerGuid = nil
+	local pvpKillerName = nil
+	local now = os.time()
+
+	if byPlayer == 0 then
+		-- 1. Verifica rastreador global de ataques PvP recentes
+		if GLOBAL_PVP_TRACKER and GLOBAL_PVP_TRACKER[playerGuid] then
+			local track = GLOBAL_PVP_TRACKER[playerGuid]
+			if (now - (track.timestamp or 0)) <= 30 then
+				pvpKillerName = track.attackerName
+				pvpKillerGuid = track.attackerGuid
+			end
+		end
+
+		-- 2. Verifica estado de combate do bot (BotState)
+		if not pvpKillerName and BotState and BotState[playerGuid] then
+			local st = BotState[playerGuid]
+			if st.lastPvpAttackerName and (now - (st.lastPvpAttackerTime or 0)) <= 30 then
+				pvpKillerName = st.lastPvpAttackerName
+				pvpKillerGuid = st.lastPvpAttackerGuid
+			end
+		end
+
+		-- 3. Verifica se a vítima estava em uma sessão ativa de disputa territorial de cave
+		if not pvpKillerName and BotDispute and BotDispute.byParticipant and BotDispute.sessions then
+			local caveKey = BotDispute.byParticipant[playerGuid]
+			if caveKey then
+				local session = BotDispute.sessions[caveKey]
+				if session and session.participants then
+					for _, part in ipairs(session.participants) do
+						if part.guid ~= playerGuid and part.life == "ALIVE" then
+							pvpKillerName = part.name
+							pvpKillerGuid = part.guid
+							break
+						end
+					end
+				end
+			end
+		end
+
+		-- Se foi identificado um agressor/rival de PvP no contexto da fatalidade:
+		if pvpKillerName then
+			killerName = pvpKillerName
+			byPlayer = 1
+			mostDamageName = pvpKillerName
+			byPlayerMostDamage = 1
+
+			local hasParticipant = false
+			for _, p in ipairs(participants) do
+				if p.name == pvpKillerName then
+					hasParticipant = true
+					break
+				end
+			end
+			if not hasParticipant then
+				table.insert(participants, 1, { name = pvpKillerName, type = "player" })
+			end
+		end
+	end
 
 	player:takeScreenshot(byPlayer == 1 and SCREENSHOT_TYPE_DEATHPVP or SCREENSHOT_TYPE_DEATHPVE)
 
-	if mostDamageKiller and mostDamageKiller:isPlayer() then
+	if byPlayer == 1 and pvpKillerGuid then
+		local pvpKillerPlayer = Player(pvpKillerGuid)
+		if pvpKillerPlayer then
+			pvpKillerPlayer:takeScreenshot(SCREENSHOT_TYPE_PLAYERKILL)
+		end
+	elseif mostDamageKiller and mostDamageKiller:isPlayer() then
 		mostDamageKiller:takeScreenshot(SCREENSHOT_TYPE_PLAYERKILL)
 	end
 
-	local playerGuid = player:getGuid()
 	saveDeathRecord(playerGuid, player, killerName, byPlayer, mostDamageName, byPlayerMostDamage, unjustified, mostDamageUnjustified, participants)
 
 	Webhook.sendMessage(":skull_crossbones: " .. player:getMarkdownLink() .. " has died. Killed at level _" .. player:getLevel() .. "_ by **" .. killerName .. "**.", announcementChannels["player-kills"])
