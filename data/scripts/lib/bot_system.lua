@@ -10963,6 +10963,20 @@ function BotSystem.beginHuntPhase(player, state, phase)
 	end
 
 	if phase == HUNT_PHASE.TRAVEL_TO then
+		-- CHECKLIST: nunca teleporta pra cave sem o mínimo de vitais; senão o bot quica
+		-- cave<->cidade (outOfVitals em doHuntPatrol) até huntEndTime. Tenta repor in-place
+		-- uma vez (ensurePotionQuota só debita banco e adiciona itens, sem andar); se ainda
+		-- faltar (sem gold), aborta pra casa com cooldown em vez de teleportar pra outro bounce.
+		if not BotSystem.isReadyToHunt(player) then
+			BotSystem.ensurePotionQuota(player, state)
+			if not BotSystem.isReadyToHunt(player) then
+				logger.warn(string.format(
+					"[Bot:%s] checklist de hunt falhou: sem vitais (sem gold p/ poções), abortando hunt %s",
+					player:getName(), tostring(state.huntScriptId)))
+				BotSystem.abortHunt(player, state, "no vitals (cannot afford potions)")
+				return
+			end
+		end
 		-- Teleport bot directly to the cave entrance (first patrol waypoint)
 		local patrolWps = BotSystem.getResolvedHuntWaypoints(player, state.huntScriptId, "hunt_patrol")
 		if patrolWps and #patrolWps > 0 then
@@ -13248,6 +13262,15 @@ function BotSystem.countVitalPotions(player)
 	local mp = (player:getItemCount(268) or 0) + (player:getItemCount(317) or 0)
 		+ (player:getItemCount(318) or 0) + (player:getItemCount(23373) or 0) + (player:getItemCount(7642) or 0)
 	return hp, mp
+end
+
+-- Checklist mínimo de prontidão para hunt: precisa carregar ao menos 1 poção de VIDA
+-- e 1 de MANA. Espelha o outOfVitals de doHuntPatrol, para o bot nunca ser teleportado
+-- pra cave só para quicar de volta à cidade no primeiro tick.
+function BotSystem.isReadyToHunt(player)
+	if not player or player:isRemoved() then return false end
+	local hp, mp = BotSystem.countVitalPotions(player)
+	return hp > 0 and mp > 0
 end
 
 -- Preparo executado SEMPRE antes de cada hunt (in-place, sem andar):
