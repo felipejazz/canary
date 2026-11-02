@@ -596,6 +596,12 @@ function Player:onGainExperience(target, exp, rawExp)
 	local lowLevelBonusExp = self:getFinalLowLevelBonus()
 	local baseRateExp = self:getFinalBaseRateExperience()
 
+	-- Bots: taxa base de experiência x5 (substitui o rate global).
+	-- O bônus de stamina e o low-level bonus continuam somando por cima.
+	if self.isBotPlayer and self:isBotPlayer() then
+		baseRateExp = 5
+	end
+
 	-- Return final experience value
 	return (exp * (1 + xpBoostPercent / 100 + lowLevelBonusExp / 100)) * staminaBonusXp * baseRateExp
 end

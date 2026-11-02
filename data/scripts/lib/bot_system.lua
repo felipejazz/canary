@@ -8171,48 +8171,19 @@ function BotSystem.tryOpenDoors(player, targetPos, state)
 				for _, item in ipairs(items) do
 					local itemId = item:getId()
 
-					-- 1. Check LOCKED_KEY_DOORS (requires a physical key with matching actionId in backpack)
+					-- 1. Check LOCKED_KEY_DOORS. Política: bots são "chave-mestra" e destravam
+					-- qualquer porta de chave, com ou sem a chave física no inventário.
 					local openKeyDoorId = LOCKED_KEY_DOORS and LOCKED_KEY_DOORS[itemId]
 					if openKeyDoorId then
 						local reqKey = (item.getActionId and item:getActionId()) or (item.actionid) or 0
+						item:transform(openKeyDoorId)
+						tilePos:sendMagicEffect(CONST_ME_MAGIC_YELLOW)
 						if reqKey > 0 then
-							local hasKey = BotSystem.playerHasKey(player, reqKey)
-							if hasKey then
-								item:transform(openKeyDoorId)
-								tilePos:sendMagicEffect(CONST_ME_MAGIC_YELLOW)
-								player:say("*unlocks door with key " .. reqKey .. "*", TALKTYPE_MONSTER_SAY)
-								logger.info(string.format("[BotKey] %s destrancou porta em (%d,%d,%d) usando Key #%d!",
-									player:getName(), tilePos.x, tilePos.y, tilePos.z, reqKey))
-								return true
-							else
-								logger.warn(string.format("[BotKey] %s bloqueado por porta trancada (Key #%d) em (%d,%d,%d)!",
-									player:getName(), reqKey, tilePos.x, tilePos.y, tilePos.z))
-								local now = os.time()
-								local bState = botState or (BotState and guid and BotState[guid])
-								local lastImpKey = string.format("key_door_%d_%d_%d", tilePos.x, tilePos.y, tilePos.z)
-								if bState then
-									bState.lastDoorImpediments = bState.lastDoorImpediments or {}
-									local lastTime = bState.lastDoorImpediments[lastImpKey] or 0
-									if (now - lastTime) >= 30 then
-										bState.lastDoorImpediments[lastImpKey] = now
-										BotSystem.recordImpediment(player, huntId, nil, nil, "MISSING_KEY",
-											"Key #" .. reqKey,
-											string.format("Bloqueado por porta trancada em (%d,%d,%d) que exige Key #%d", tilePos.x, tilePos.y, tilePos.z, reqKey),
-											tilePos)
-									end
-								else
-									BotSystem.recordImpediment(player, huntId, nil, nil, "MISSING_KEY",
-										"Key #" .. reqKey,
-										string.format("Bloqueado por porta trancada em (%d,%d,%d) que exige Key #%d", tilePos.x, tilePos.y, tilePos.z, reqKey),
-										tilePos)
-								end
-								return false
-							end
-						else
-							-- Locked door sprite on map without actionId
-							item:transform(openKeyDoorId)
-							return true
+							player:say("*unlocks door with key " .. reqKey .. "*", TALKTYPE_MONSTER_SAY)
+							logger.info(string.format("[BotKey] %s destrancou porta em (%d,%d,%d) (Key #%d, chave-mestra)!",
+								player:getName(), tilePos.x, tilePos.y, tilePos.z, reqKey))
 						end
+						return true
 					end
 
 					-- 2. Check normal closed doors
@@ -8224,25 +8195,16 @@ function BotSystem.tryOpenDoors(player, targetPos, state)
 						return true
 					end
 
-					-- 3. Check LevelDoorTable (only open if bot meets the level requirement)
+					-- 3. Check LevelDoorTable. Política: bots passam por qualquer level door
+					-- independentemente do nível (o closing_door.lua também isenta bots).
 					local levelOpenId = LEVEL_DOOR_MAP and LEVEL_DOOR_MAP[itemId]
 					if levelOpenId then
 						local aid = (item.getActionId and item:getActionId()) or (item.actionid) or 0
 						local reqLevel = (aid > 1000) and (aid - 1000) or 0
-						if player:getLevel() >= reqLevel then
-							item:transform(levelOpenId)
-							logger.info(string.format("[Bot] %s opened level door (req: %d, bot: %d) at (%d,%d,%d)",
-								player:getName(), reqLevel, player:getLevel(), tilePos.x, tilePos.y, tilePos.z))
-							return true
-						else
-							logger.info(string.format("[Bot] %s blocked by level door (req: %d, bot: %d) at (%d,%d,%d)",
-								player:getName(), reqLevel, player:getLevel(), tilePos.x, tilePos.y, tilePos.z))
-							BotSystem.recordImpediment(player, huntId, nil, nil, "LEVEL_DOOR",
-								"Level " .. reqLevel,
-								string.format("Bloqueado por Level Door (requer lvl %d, atual lvl %d) em (%d,%d,%d)", reqLevel, player:getLevel(), tilePos.x, tilePos.y, tilePos.z),
-								tilePos)
-							return false
-						end
+						item:transform(levelOpenId)
+						logger.info(string.format("[Bot] %s opened level door (req: %d, bot: %d) at (%d,%d,%d)",
+							player:getName(), reqLevel, player:getLevel(), tilePos.x, tilePos.y, tilePos.z))
+						return true
 					end
 				end
 			end
@@ -11494,32 +11456,20 @@ function BotSystem.handleHuntWaypointAction(player, state, wp)
 		local doorPos = Position(wp.pos_x, wp.pos_y, wp.pos_z)
 		BotSystem.tryOpenDoors(player, doorPos, state)
 	elseif wtype == "acquire_key" then
-		local kInfo = wp.key_info or (wp.extra_data and HUNT_KEYS_BY_NUMBER[tonumber(wp.extra_data)])
-		if kInfo then
-			local ok = BotSystem.executeKeyAcquisitionStep(player, kInfo, state.huntScriptId, nil, nil)
-			if not ok then
-				BotSystem.abortHunt(player, state, "missing GP for key #" .. tostring(kInfo.key_number))
-			end
-		end
+		-- Acesso pulado por política: bots abrem qualquer porta (ver tryOpenDoors), então
+		-- não compram chave nem abortam a hunt por falta de GP. Waypoint vira no-op.
+		BotSystem.castDebug(player, state, "ACTION: acquire_key ignorado (bots abrem todas as portas)")
 	elseif wtype == "quest_access" then
-		local accInfo = wp.access_info or (wp.extra_data and QUEST_ACCESS_BY_ID[tonumber(wp.extra_data)])
-		if accInfo then
-			local ok = BotSystem.executeQuestNpcInteraction(player, accInfo, state.huntScriptId, nil, nil)
-			if not ok then
-				BotSystem.abortHunt(player, state, "falha ao obter acesso de quest " .. tostring(accInfo.name))
-				return
-			end
-		end
+		-- Acesso de quest pulado por política: portas de quest são destravadas para bots
+		-- (quest_door.lua / closing_door.lua bypass), então não interage com NPC nem aborta.
+		BotSystem.castDebug(player, state, "ACTION: quest_access ignorado (acesso dispensado para bots)")
 	elseif wtype == "npc_interact" then
 		local wps = state.huntWaypoints
 		local nextWp = wps and wps[(state.huntWaypointIdx or 0) + 1] or nil
 		local curPos = player:getPosition()
 		local nextPos = (nextWp and nextWp.pos_x and nextWp.pos_x > 0) and Position(nextWp.pos_x, nextWp.pos_y, nextWp.pos_z) or nil
-		local ok, routeInfo = BotSystem.performNpcTravelInteraction(player, curPos, nextPos, wp.label, state.huntScriptId, nil, nil)
-		if not ok then
-			BotSystem.abortHunt(player, state, "insufficient GP for NPC travel")
-			return
-		end
+		-- Best-effort (diálogo/rota), mas NUNCA aborta por falta de GP: o acesso é dispensado.
+		pcall(function() BotSystem.performNpcTravelInteraction(player, curPos, nextPos, wp.label, state.huntScriptId, nil, nil) end)
 		if nextPos and (math.abs(curPos.x - nextPos.x) > 30 or math.abs(curPos.y - nextPos.y) > 30 or curPos.z ~= nextPos.z) then
 			player:teleportTo(nextPos, true)
 			BotSystem.castDebug(player, state, "ACTION: NPC travel teleported to (" .. nextPos.x .. "," .. nextPos.y .. "," .. nextPos.z .. ")")

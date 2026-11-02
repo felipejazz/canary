@@ -23,6 +23,12 @@ function closingDoor.onStepIn(creature, item, position, fromPosition)
 		return
 	end
 
+	-- Bots passam por qualquer quest/level door (acesso dispensado), igual ao bypass em
+	-- actions/doors/quest_door.lua. Sem isso o stepin os teleportaria de volta.
+	if player.isBotPlayer and player:isBotPlayer() then
+		return true
+	end
+
 	for index, value in ipairs(QuestDoorTable) do
 		if value.openDoor == item.itemid then
 			if player:getStorageValue(item.actionid) ~= -1 then
