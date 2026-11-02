@@ -9388,7 +9388,7 @@ function BotSystem.dropIrrelevantItems(player)
 
 	local protectedItemIds = {
 		[3003] = true, [3457] = true, [3456] = true, [3308] = true, [5710] = true, -- tools
-		[268] = true, [266] = true, [315] = true, [316] = true, [317] = true, [318] = true, [7642] = true, [7643] = true, -- potions
+		[268] = true, [266] = true, [236] = true, [239] = true, [237] = true, [238] = true, [7642] = true, [7643] = true, -- potions
 		[3725] = true, [3582] = true, [3577] = true, -- food
 		[3155] = true, [3191] = true, [3161] = true, [3175] = true, [3160] = true, [3152] = true, [3178] = true, [3198] = true, [3189] = true, -- runes
 		[3447] = true, [7364] = true, [7365] = true, [15793] = true, [3277] = true, [7378] = true, [14251] = true, [7368] = true, -- paladin ammo/spears
@@ -9725,12 +9725,12 @@ function BotSystem.checkBotPotions(player, state)
 
 	-- 1. Emergency Health Potion for Knights (hp < 50%)
 	if baseVoc == 4 and (hp / math.max(maxHp, 1)) < 0.5 then
-		local hpPots = { 7643, 316, 315, 266 }
+		local hpPots = { 7643, 239, 236, 266 }
 		local hasPot, potId = tryConsumePotion(hpPots)
 		if hasPot then
 			local healAmount = (potId == 7643 and math.random(850, 1150))
-				or (potId == 316 and math.random(750, 950))
-				or (potId == 315 and math.random(450, 650))
+				or (potId == 239 and math.random(750, 950))
+				or (potId == 236 and math.random(450, 650))
 				or math.random(150, 220)
 			player:addHealth(healAmount)
 			used = true
@@ -9740,19 +9740,19 @@ function BotSystem.checkBotPotions(player, state)
 	-- 2. Mana Potion Recovery for all vocations (mana < 60%)
 	if not used and (mana / math.max(maxMana, 1)) < 0.6 then
 		if baseVoc == 1 or baseVoc == 2 then -- Sorcerer / Druid
-			local mpPots = { 23373, 318, 317, 268 }
+			local mpPots = { 23373, 238, 237, 268 }
 			local hasPot, potId = tryConsumePotion(mpPots)
 			if hasPot then
 				local manaAmount = (potId == 23373 and math.random(600, 800))
-					or (potId == 318 and math.random(420, 580))
-					or (potId == 317 and math.random(170, 230))
+					or (potId == 238 and math.random(420, 580))
+					or (potId == 237 and math.random(170, 230))
 					or math.random(80, 120)
 				player:addMana(manaAmount)
 				used = true
 			end
 		elseif baseVoc == 3 then -- Paladin (Mana / Spirit potions)
-			local spiritPots = { 7642, 315, 266 }
-			local mpPots = { 317, 268 }
+			local spiritPots = { 7642, 236, 266 }
+			local mpPots = { 237, 268 }
 			if (hp / math.max(maxHp, 1)) < 0.6 then
 				local hasPot, potId = tryConsumePotion(spiritPots)
 				if hasPot then
@@ -9764,7 +9764,7 @@ function BotSystem.checkBotPotions(player, state)
 			if not used then
 				local hasPot, potId = tryConsumePotion(mpPots)
 				if hasPot then
-					player:addMana(potId == 317 and math.random(130, 170) or math.random(80, 120))
+					player:addMana(potId == 237 and math.random(130, 170) or math.random(80, 120))
 					used = true
 				end
 			end
@@ -13037,7 +13037,7 @@ BotSystem.BP_SELL_MIN = BotSystem.BP_SELL_MIN or 30
 -- Itens que o bot NUNCA vende/dropa (consumíveis/ferramentas essenciais da hunt).
 BotSystem.PROTECTED_BP_ITEMS = BotSystem.PROTECTED_BP_ITEMS or {
 	[3003] = true, [3457] = true, [3456] = true, [3308] = true, [5710] = true, -- tools (rope/shovel/machete/pick/scythe)
-	[268] = true, [266] = true, [315] = true, [316] = true, [317] = true, [318] = true, [7642] = true, [7643] = true, [23373] = true, -- potions
+	[268] = true, [266] = true, [236] = true, [239] = true, [237] = true, [238] = true, [7642] = true, [7643] = true, [23373] = true, -- potions
 	[3725] = true, [3582] = true, [3577] = true, -- food
 	[3155] = true, [3191] = true, [3161] = true, [3175] = true, [3160] = true, [3152] = true, [3178] = true, [3198] = true, [3189] = true, -- runes
 	[3447] = true, [7364] = true, [7365] = true, [15793] = true, [3277] = true, [7378] = true, [14251] = true, [7368] = true, -- paladin ammo/spears
@@ -13257,10 +13257,10 @@ end
 -- Conta poções vitais que o bot carrega, agregadas por tipo (vida x mana).
 -- 7642 (great spirit) conta nos dois por restaurar hp+mana.
 function BotSystem.countVitalPotions(player)
-	local hp = (player:getItemCount(266) or 0) + (player:getItemCount(315) or 0)
-		+ (player:getItemCount(316) or 0) + (player:getItemCount(7643) or 0) + (player:getItemCount(7642) or 0)
-	local mp = (player:getItemCount(268) or 0) + (player:getItemCount(317) or 0)
-		+ (player:getItemCount(318) or 0) + (player:getItemCount(23373) or 0) + (player:getItemCount(7642) or 0)
+	local hp = (player:getItemCount(266) or 0) + (player:getItemCount(236) or 0)
+		+ (player:getItemCount(239) or 0) + (player:getItemCount(7643) or 0) + (player:getItemCount(7642) or 0)
+	local mp = (player:getItemCount(268) or 0) + (player:getItemCount(237) or 0)
+		+ (player:getItemCount(238) or 0) + (player:getItemCount(23373) or 0) + (player:getItemCount(7642) or 0)
 	return hp, mp
 end
 
@@ -13395,17 +13395,17 @@ function BotSystem.getFixedSupplyTable(level, baseVoc)
 			}
 		elseif level >= 100 then
 			return {
-				primary = { id = 316, name = "Great Health Potion", count = 400, price = 225 },
+				primary = { id = 239, name = "Great Health Potion", count = 400, price = 225 },
 				secondary = { id = 268, name = "Mana Potion", count = 150, price = 56 }
 			}
 		elseif level >= 80 then
 			return {
-				primary = { id = 316, name = "Great Health Potion", count = 300, price = 225 },
+				primary = { id = 239, name = "Great Health Potion", count = 300, price = 225 },
 				secondary = { id = 268, name = "Mana Potion", count = 120, price = 56 }
 			}
 		elseif level >= 50 then
 			return {
-				primary = { id = 315, name = "Strong Health Potion", count = 220, price = 115 },
+				primary = { id = 236, name = "Strong Health Potion", count = 220, price = 115 },
 				secondary = { id = 268, name = "Mana Potion", count = 100, price = 56 }
 			}
 		elseif level >= 20 then
@@ -13423,27 +13423,27 @@ function BotSystem.getFixedSupplyTable(level, baseVoc)
 		if level >= 200 then
 			return {
 				primary = { id = 7642, name = "Great Spirit Potion", count = 450, price = 228 },
-				secondary = { id = 317, name = "Strong Mana Potion", count = 450, price = 93 }
+				secondary = { id = 237, name = "Strong Mana Potion", count = 450, price = 93 }
 			}
 		elseif level >= 130 then
 			return {
 				primary = { id = 7642, name = "Great Spirit Potion", count = 350, price = 228 },
-				secondary = { id = 317, name = "Strong Mana Potion", count = 350, price = 93 }
+				secondary = { id = 237, name = "Strong Mana Potion", count = 350, price = 93 }
 			}
 		elseif level >= 100 then
 			return {
 				primary = { id = 7642, name = "Great Spirit Potion", count = 250, price = 228 },
-				secondary = { id = 317, name = "Strong Mana Potion", count = 250, price = 93 }
+				secondary = { id = 237, name = "Strong Mana Potion", count = 250, price = 93 }
 			}
 		elseif level >= 80 then
 			return {
 				primary = { id = 7642, name = "Great Spirit Potion", count = 180, price = 228 },
-				secondary = { id = 317, name = "Strong Mana Potion", count = 180, price = 93 }
+				secondary = { id = 237, name = "Strong Mana Potion", count = 180, price = 93 }
 			}
 		elseif level >= 50 then
 			return {
-				primary = { id = 315, name = "Strong Health Potion", count = 120, price = 115 },
-				secondary = { id = 317, name = "Strong Mana Potion", count = 120, price = 93 }
+				primary = { id = 236, name = "Strong Health Potion", count = 120, price = 115 },
+				secondary = { id = 237, name = "Strong Mana Potion", count = 120, price = 93 }
 			}
 		elseif level >= 20 then
 			return {
@@ -13460,27 +13460,27 @@ function BotSystem.getFixedSupplyTable(level, baseVoc)
 		if level >= 200 then
 			return {
 				primary = { id = 23373, name = "Ultimate Mana Potion", count = 700, price = 150 },
-				secondary = { id = 316, name = "Great Health Potion", count = 80, price = 225 }
+				secondary = { id = 239, name = "Great Health Potion", count = 80, price = 225 }
 			}
 		elseif level >= 130 then
 			return {
 				primary = { id = 23373, name = "Ultimate Mana Potion", count = 550, price = 150 },
-				secondary = { id = 316, name = "Great Health Potion", count = 70, price = 225 }
+				secondary = { id = 239, name = "Great Health Potion", count = 70, price = 225 }
 			}
 		elseif level >= 100 then
 			return {
-				primary = { id = 318, name = "Great Mana Potion", count = 450, price = 144 },
-				secondary = { id = 316, name = "Great Health Potion", count = 60, price = 225 }
+				primary = { id = 238, name = "Great Mana Potion", count = 450, price = 144 },
+				secondary = { id = 239, name = "Great Health Potion", count = 60, price = 225 }
 			}
 		elseif level >= 80 then
 			return {
-				primary = { id = 318, name = "Great Mana Potion", count = 350, price = 144 },
-				secondary = { id = 315, name = "Strong Health Potion", count = 50, price = 115 }
+				primary = { id = 238, name = "Great Mana Potion", count = 350, price = 144 },
+				secondary = { id = 236, name = "Strong Health Potion", count = 50, price = 115 }
 			}
 		elseif level >= 50 then
 			return {
-				primary = { id = 317, name = "Strong Mana Potion", count = 250, price = 93 },
-				secondary = { id = 315, name = "Strong Health Potion", count = 40, price = 115 }
+				primary = { id = 237, name = "Strong Mana Potion", count = 250, price = 93 },
+				secondary = { id = 236, name = "Strong Health Potion", count = 40, price = 115 }
 			}
 		elseif level >= 20 then
 			return {
@@ -13811,8 +13811,8 @@ function BotSystem.doHuntResupply(player, state)
 					bank_gold = player:getBankBalance(),
 					current_potions = curPots,
 					-- estoque real por tier (p/ o refill abater do alvo e nao comprar a mais)
-					potions_mana = player:getItemCount(268) + player:getItemCount(317) + player:getItemCount(318) + player:getItemCount(23373),
-					potions_health = player:getItemCount(266) + player:getItemCount(315) + player:getItemCount(316) + player:getItemCount(7643) + player:getItemCount(7642),
+					potions_mana = player:getItemCount(268) + player:getItemCount(237) + player:getItemCount(238) + player:getItemCount(23373),
+					potions_health = player:getItemCount(266) + player:getItemCount(236) + player:getItemCount(239) + player:getItemCount(7643) + player:getItemCount(7642),
 					current_runes = player:getItemCount(3155) + player:getItemCount(3191) + player:getItemCount(3161),
 					current_food = player:getItemCount(3725)
 				}
