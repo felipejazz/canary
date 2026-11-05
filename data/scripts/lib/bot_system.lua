@@ -348,7 +348,7 @@ BOT_CONFIG = {
 	BOT_ACCOUNT_ID = 65000,
 	-- Active bot count comes from config.lua botPlayersOnline (default 75 if unset).
 	-- Capped by BotStartup against the actual DB pool size.
-	TARGET_ONLINE = 30,
+	TARGET_ONLINE = 25,
 	-- Sole consumer is botManager:interval() (bot_manager.lua), whose onThink body is now
 	-- ONLY the bot_commands queue poll — the population manager it was named for is disabled.
 	-- Was 10000, which made every /cavebot command wait 0-10s (mean 5s) and made agentic
@@ -395,7 +395,14 @@ BOT_CONFIG = {
 	HUNT_RESUPPLY_DEPOT_MAX = 15,
 	HUNT_RESUPPLY_SHOP_MIN = 5,      -- seconds at each shop NPC
 	HUNT_RESUPPLY_SHOP_MAX = 10,
-	MACRO_DECISION_COOLDOWN = 40,    -- seconds per bot between autonomous Node.js macro decisions
+	-- Macro-decisions are mostly resolved LOCALLY (BotSystem.decideMacroLocal, zero network/token).
+	-- A POST to the decision service only happens when AI "flavor" is warranted (human nearby or a
+	-- dramatic moment — see requestNodeMacroDecision). The cooldown is aligned with how long a macro
+	-- decision actually lasts (duration_minutes 15-30), and the wide jitter desyncs the 50 bots so they
+	-- don't re-decide in lockstep (credibility).
+	MACRO_DECISION_COOLDOWN = 150,   -- seconds per bot between autonomous macro decisions (was 40)
+	MACRO_DECISION_JITTER = 120,     -- extra random seconds on top of the cooldown (anti-lockstep)
+	MACRO_AI_RANGE = 8,              -- tiles: a real player this close makes a macro decision use AI
 	DIALOGUE_COOLDOWN = 180,         -- seconds per bot between Bot-to-Bot conversations
 	DIALOGUE_GLOBAL_COOLDOWN = 45,   -- seconds global between Bot-to-Bot conversations
 	HUNT_MONSTER_SCAN_RADIUS = 7,
@@ -7045,7 +7052,7 @@ function BotSystem.doIdle(player, state)
 	if not state.walkTarget and BotSystem.requestNodeMacroDecision then
 		local now = os.time()
 		if now >= (state.nextMacroDecisionTime or 0) then
-			state.nextMacroDecisionTime = now + (BOT_CONFIG.MACRO_DECISION_COOLDOWN or 40) + math.random(0, 15)
+			state.nextMacroDecisionTime = now + (BOT_CONFIG.MACRO_DECISION_COOLDOWN or 150) + math.random(0, BOT_CONFIG.MACRO_DECISION_JITTER or 120)
 			BotSystem.requestNodeMacroDecision(player, state)
 		end
 	end
@@ -7198,8 +7205,12 @@ function BotSystem.doDwelling(player, state)
 		state.currentPOI = nil
 		state.pathFailCount = 0
 		state.idleDepotTarget = nil
-		if BotSystem.requestNodeMacroDecision then
-			state.nextMacroDecisionTime = os.time() + (BOT_CONFIG.MACRO_DECISION_COOLDOWN or 40)
+		-- Leaving the POI always transitions to IDLE above; only fire a macro decision when the
+		-- per-bot cooldown allows it. Otherwise doIdle takes over (hunt/travel rolls) until it's due.
+		-- This kills the old storm where every dwell expiry (10-25s) forced a macro call.
+		local now = os.time()
+		if BotSystem.requestNodeMacroDecision and now >= (state.nextMacroDecisionTime or 0) then
+			state.nextMacroDecisionTime = now + (BOT_CONFIG.MACRO_DECISION_COOLDOWN or 150) + math.random(0, BOT_CONFIG.MACRO_DECISION_JITTER or 120)
 			BotSystem.requestNodeMacroDecision(player, state)
 		end
 	end
@@ -9394,8 +9405,35 @@ function BotSystem.dropIrrelevantItems(player)
 end
 
 -- Inspeção frequente anti-nudez: garante que o bot nunca fique 'pelado'
+-- PvP ativo: o bot esta lutando contra OUTRO PLAYER (humano ou bot) que ainda esta presente
+-- (vivo, mesmo andar, em tela), ou numa disputa de cave. Enquanto isso o bot NAO pode se
+-- reabastecer de graca (pocoes/municao/gear/regen): se repuser a cada ciclo, nunca morre.
+-- Volta a falso quando o rival morre, sai de tela/offline, ou o proprio bot morre/sai.
+BotSystem.PVP_REFILL_BLOCK_RANGE = 14
+
+function BotSystem.isInPvp(player, state)
+	if not player or player:isRemoved() or not state then return false end
+	local pos = player:getPosition()
+	local range = BotSystem.PVP_REFILL_BLOCK_RANGE
+
+	local function rivalPresent(id)
+		if not id then return false end
+		local c = Creature(id)
+		if not c or c:isRemoved() or not c:isPlayer() or c:getHealth() <= 0 then return false end
+		local cp = c:getPosition()
+		return cp.z == pos.z and math.max(math.abs(cp.x - pos.x), math.abs(cp.y - pos.y)) <= range
+	end
+
+	if rivalPresent(state.pkTarget) or rivalPresent(state.attackerId) then return true end
+	if BotDispute and BotDispute.isPlayerInFight and BotDispute.isPlayerInFight(player:getGuid()) then
+		return true
+	end
+	return false
+end
+
 function BotSystem.checkEquipmentCompleteness(player, state)
 	if not player or player:isRemoved() then return end
+	if BotSystem.isInPvp(player, state) then return end -- sem refill em PvP (ver isInPvp)
 	-- Pots/suprimentos NAO pesam na cap dos bots: piso de capacidade generoso
 	-- (2000000 = 20000 oz) para que levem o maximo de pots sem encher a cap.
 	pcall(function() if (player:getCapacity() or 0) < 2000000 then player:setCapacity(2000000) end end)
@@ -9542,6 +9580,7 @@ end
 -- Paladin ammunition management: only refills when completely OUT OF AMMO (count == 0).
 -- Archer paladins use Quivers; spears go directly into weapon hand.
 function BotSystem.checkPaladinAmmo(player, state)
+	if BotSystem.isInPvp(player, state) then return end -- sem refill em PvP (ver isInPvp)
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
 	if baseVoc ~= 3 then return end
@@ -9645,6 +9684,7 @@ end
 
 -- Food supply & auto-eat com consumo de itens fisicos da mochila
 function BotSystem.checkBotFoodAndRegen(player, state)
+	if BotSystem.isInPvp(player, state) then return end -- sem regen gratis em PvP (ver isInPvp)
 	local cond = player:getCondition(CONDITION_REGENERATION, CONDITIONID_DEFAULT)
 	local regenTicks = cond and cond:getTicks() or 0
 
@@ -10929,7 +10969,7 @@ function BotSystem.beginHuntPhase(player, state, phase)
 		-- cave<->cidade (outOfVitals em doHuntPatrol) até huntEndTime. Tenta repor in-place
 		-- uma vez (ensurePotionQuota só debita banco e adiciona itens, sem andar); se ainda
 		-- faltar (sem gold), aborta pra casa com cooldown em vez de teleportar pra outro bounce.
-		if not BotSystem.isReadyToHunt(player) then
+		if not BotSystem.isReadyToHunt(player) and not BotSystem.isInPvp(player, state) then
 			BotSystem.ensurePotionQuota(player, state)
 			if not BotSystem.isReadyToHunt(player) then
 				logger.warn(string.format(
@@ -13038,6 +13078,7 @@ end
 -- Independente do NotJev -> o bot nunca sai sem mana nem sem health.
 function BotSystem.ensurePotionQuota(player, state)
 	if not player or player:isRemoved() then return end
+	if BotSystem.isInPvp(player, state) then return end -- sem refill em PvP (ver isInPvp)
 	local voc = player:getVocation()
 	local baseVoc = voc and voc:getBaseId() or 4
 	local level = player:getLevel()
@@ -13521,6 +13562,7 @@ function BotSystem.executeShopTrade(player, state)
 end
 
 function BotSystem.doHuntResupply(player, state)
+	if BotSystem.isInPvp(player, state) then return end -- sem resupply em PvP (ver isInPvp)
 	-- Resupply timeout: 5 minutes max total for entire resupply/prepare phase
 	if not state.resupplyStartTime then
 		state.resupplyStartTime = os.time()
@@ -14691,11 +14733,109 @@ function BotSystem.executeMacroIntent(player, state, intent, speech, targetPlaye
 	end
 end
 
--- Autonomous Macro-Decision: Bot asks Node.js (:3001) what to do for itself
+-- Is there a REAL (non-bot) player within `range` tiles on the same/near floor?
+-- Reuses Game.getSpectators(onlyPlayers=true) + Player.isBotPlayer (the canonical discriminator).
+-- Cheap: scans only the spectator box, not Game.getPlayers(). Used to decide when a macro
+-- decision is worth an AI call (a human can see/hear the bot) and for bot<->bot dialogue gating.
+function BotSystem.isHumanNearby(player, range)
+	if not player or player:isRemoved() then return false end
+	range = range or (BOT_CONFIG.MACRO_AI_RANGE or 8)
+	local pos = player:getPosition()
+	if not pos then return false end
+	local specs = Game.getSpectators(pos, false, true, range, range, range, range)
+	local myGuid = player:getGuid()
+	for _, c in ipairs(specs or {}) do
+		if c and c:isPlayer() and not c:isRemoved() and c:getGuid() ~= myGuid then
+			if not (c.isBotPlayer and c:isBotPlayer()) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- Varied in-game speech per archetype/action so routine decisions don't read as a script.
+-- One pool per action; archetype 2 (Arrojado) gets its own flavor on the common HUNT case.
+local MACRO_PHRASES = {
+	HUNT = {
+		[2] = { "Partiu rushar xp em monstro pesado!", "Bora pro respawn, o bicho morre na raca!", "Chega de enrolar, vou cacar algo forte!" },
+		default = { "Bora cacar e upar um pouco!", "Vou dar uma volta nas caves agora.", "Hora de farmar xp e loot.", "Partiu hunt, ta na hora." },
+	},
+	RESTOCK = {
+		[3] = { "Mochila cheia de loot! Partiu depot lucrar.", "Hora de descarregar e contar o ouro.", "Vou no depot guardar o profit." },
+		default = { "Suprimentos no fim, voltando pro depot.", "Vou repor as pots e organizar a mochila.", "Pausa rapida no depot pra reabastecer." },
+	},
+	FLEE = {
+		default = { "Quase morri! Recuando pra me curar.", "Ta feio, vou recuar antes de cair.", "Preciso sair dessa, voltando pra cidade." },
+	},
+	TRAIN = {
+		default = { "Vou treinar skill na estatua.", "Ta na hora de melhorar meu combate na estatua.", "Treino nunca e demais, partiu estatua." },
+	},
+	SOCIAL = {
+		default = { "Dando uma volta no depot pra trocar ideia.", "Vou ver o movimento no depot.", "Bora socializar um pouco na cidade." },
+	},
+}
+
+local function pickMacroPhrase(action, archId)
+	local byAction = MACRO_PHRASES[action]
+	if not byAction then return nil end
+	local pool = byAction[archId] or byAction.default
+	if not pool or #pool == 0 then return nil end
+	return pool[math.random(1, #pool)]
+end
+
+-- Routine macro decision resolved LOCALLY (zero network, zero token). Mirrors the service's
+-- fast_decision cascade but uses the REAL signals the Lua side has (hp%, cap, skill target,
+-- archetype thresholds) instead of the hardcoded status the payload used to send. Returns
+-- (intent, speech). Personality shows through per-archetype thresholds and varied speech.
+function BotSystem.decideMacroLocal(player, state)
+	local arch = BotSystem.getBotArchetype(player, state)
+	local archId = arch and arch.id or 2
+	local hpPct = math.floor((player:getHealth() / math.max(1, player:getMaxHealth())) * 100)
+	local capFree = math.floor(player:getFreeCapacity() / 100)
+	local skillInfo = BotSystem.getSkillTargetInfo and BotSystem.getSkillTargetInfo(player) or {}
+
+	-- 1. HP perigosamente baixo -> recuar (threshold por arquétipo)
+	if hpPct <= (arch.hpFleeThreshold or 35) then
+		return "RESTOCK", pickMacroPhrase("FLEE", archId)
+	end
+
+	-- 2. Capacidade esgotada -> depot (mercenário descarrega mais cedo)
+	local capThreshold = (archId == 3) and 50 or 30
+	if capFree <= capThreshold then
+		return "RESTOCK", pickMacroPhrase("RESTOCK", archId)
+	end
+
+	-- 3. Treino nas estátuas, se a personalidade exigir
+	if BotSystem.shouldBotTrain(player, state, skillInfo) then
+		return "TRAIN", pickMacroPhrase("TRAIN", archId)
+	end
+
+	-- 4. Social (Explorador, chance baixa)
+	if archId == 5 and math.random(1, 4) == 1 then
+		return "SOCIAL", pickMacroPhrase("SOCIAL", archId)
+	end
+
+	-- 5. Padrão: caçar
+	return "HUNT", pickMacroPhrase("HUNT", archId)
+end
+
+-- Autonomous Macro-Decision: resolve locally by default; only ask the decision service (:3001)
+-- for AI flavor when a real player is nearby or a dramatic moment is in play (post-death/revenge).
 function BotSystem.requestNodeMacroDecision(player, state)
 	if not player or player:isRemoved() or not state then return end
 	if state.state == BOT_STATE.HUNTING or state.state == BOT_STATE.TRAINING
 		or state.state == BOT_STATE.COMBAT or state.state == BOT_STATE.PARTY then
+		return
+	end
+
+	-- AI is spent only where a player can judge it, or on dramatic beats. Everything else is local.
+	local dramatic = (state.revengeHuntId ~= nil) or ((state.recentDeathsInCave or 0) > 0)
+	local wantAI = dramatic or BotSystem.isHumanNearby(player, BOT_CONFIG.MACRO_AI_RANGE)
+	if not wantAI then
+		local intent, speech = BotSystem.decideMacroLocal(player, state)
+		logger.info(string.format("[BotMacro] %s decidiu LOCAL: %s [source=LOCAL]", player:getName(), tostring(intent)))
+		BotSystem.executeMacroIntent(player, state, intent, speech, nil)
 		return
 	end
 
@@ -14714,6 +14854,7 @@ function BotSystem.requestNodeMacroDecision(player, state)
 	local skillInfo = BotSystem.getSkillTargetInfo and BotSystem.getSkillTargetInfo(player) or {}
 
 	local payload = {
+		force_deepseek = true,  -- gate already decided AI is warranted (human nearby / dramatic)
 		guid = guid,
 		name = player:getName(),
 		level = player:getLevel(),

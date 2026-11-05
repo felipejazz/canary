@@ -13,6 +13,14 @@ local REPLENISH_INTERVAL_MS = 60000 -- Run every 60 seconds
 local GOD_PLAYER_ID = 7
 local MAX_STOCK = 65535
 local DEPLETED_THRESHOLD = 1000
+-- Multiplicador de preço por tier (tier 0 = preço de referência). Ajuste aqui.
+-- Cada item tem ofertas de VENDA em todos os tiers até o seu tier_cap (classificação do cliente).
+-- LIMITE: o login manda UM pacote 0xCD (ProtocolGame::sendItemsPrice) com uma entrada por
+-- (item, tier) que tenha oferta de COMPRA ativa (Game::loadItemsPrice), max ~65 KB. Com compras
+-- em tier 1 e 2 ele estourou e o client fechava ao entrar. Por isso as COMPRAS do GOD param em
+-- BUY_MAX_TIER (cabe ~58 KB); as VENDAS não entram no pacote e vão até o tier de cada item.
+local TIER_PRICE_MULT = { [0] = 1, [1] = 2, [2] = 4, [3] = 8, [4] = 16 }
+local BUY_MAX_TIER = 1
 
 local botMarketReplenish = GlobalEvent("BotMarketReplenish")
 
@@ -41,40 +49,74 @@ function botMarketReplenish.onThink(interval)
 			100
 		)]]
 
-	-- 3. Garante uma oferta de SELL (player COMPRA) para todo item marketável e visível no Market.
-	-- Sem LIMIT: cobre o catálogo inteiro por ciclo (INSERT..SELECT indexado por player_id,sale,itemtype).
-	db.asyncQuery(string.format([[
-		INSERT INTO `market_offers` (`player_id`, `sale`, `itemtype`, `amount`, `created`, `anonymous`, `price`, `tier`)
-		SELECT %d, 1, p.item_id, %d, UNIX_TIMESTAMP(), 1, GREATEST(1, FLOOR(%s)), 0
-		FROM `bot_market_item_prices` p
-		LEFT JOIN `tibia_market_items` t ON t.canary_item_id = p.item_id
-		WHERE p.marketable = 1 AND p.category IS NOT NULL AND p.category <> ''
-		AND p.item_id NOT IN (
-			SELECT `itemtype` FROM `market_offers` WHERE `player_id` = %d AND `sale` = 1
-		)
-	]], GOD_PLAYER_ID, MAX_STOCK, REF_PRICE, GOD_PLAYER_ID))
+	-- Remove COMPRAS do GOD acima do tier suportado (ver LIMITE acima).
+	db.asyncQuery(string.format("DELETE FROM `market_offers` WHERE `player_id` = %d AND `sale` = 0 AND `tier` > %d", GOD_PLAYER_ID, BUY_MAX_TIER))
 
-	-- 4. Garante uma oferta de BUY (player VENDE) para o mesmo conjunto -> sempre as duas pontas.
-	-- Preço = 80% da referência (abaixo do sell -> sem arbitragem).
-	db.asyncQuery(string.format([[
-		INSERT INTO `market_offers` (`player_id`, `sale`, `itemtype`, `amount`, `created`, `anonymous`, `price`, `tier`)
-		SELECT %d, 0, p.item_id, %d, UNIX_TIMESTAMP(), 1, GREATEST(1, FLOOR(%s * 0.80)), 0
+	-- 3/4. Garante as DUAS pontas para todo item marketável do catálogo, em cada tier:
+	--   SELL (sale=1, player COMPRA) pela referência x multiplicador do tier; BUY (sale=0,
+	--   player VENDE) a 80% disso (abaixo do sell -> sem arbitragem).
+	-- Tier 1/2 só existem para item com tier_cap >= tier (classificação do cliente, ver
+	-- tools/sync_item_tier_cap.py). Sem LIMIT: cobre o catálogo inteiro por ciclo.
+	-- Cada INSERT confere o resultado via callback: antes era fire-and-forget e uma falha
+	-- deixava o catálogo sem cobertura sem nenhum rastro no log.
+	local function ensureSide(sale, tier, priceExpr, label)
+		db.asyncQuery(string.format([[
+			INSERT INTO `market_offers` (`player_id`, `sale`, `itemtype`, `amount`, `created`, `anonymous`, `price`, `tier`)
+			SELECT %d, %d, p.item_id, %d, UNIX_TIMESTAMP(), 1, GREATEST(1, FLOOR(%s)), %d
+			FROM `bot_market_item_prices` p
+			LEFT JOIN `tibia_market_items` t ON t.canary_item_id = p.item_id
+			WHERE p.marketable = 1 AND p.category IS NOT NULL AND p.category <> '' AND p.tier_cap >= %d
+			AND p.item_id NOT IN (
+				SELECT `itemtype` FROM `market_offers` WHERE `player_id` = %d AND `sale` = %d AND `tier` = %d
+			)
+		]], GOD_PLAYER_ID, sale, MAX_STOCK, priceExpr, tier, tier, GOD_PLAYER_ID, sale, tier), function(success)
+			if not success then
+				logger.warn("[BotMarketReplenish] " .. label .. " tier " .. tier .. " coverage INSERT failed; retrying next cycle")
+			end
+		end)
+	end
+	for tier, mult in pairs(TIER_PRICE_MULT) do
+		local price = REF_PRICE .. " * " .. mult
+		ensureSide(1, tier, price, "SELL")
+		if tier <= BUY_MAX_TIER then
+			ensureSide(0, tier, price .. " * 0.80", "BUY")
+		end
+	end
+
+	-- 5. Watchdog de cobertura: se sobrar item do catálogo sem alguma ponta depois dos
+	-- INSERTs, avisa no log (a próxima rodada tenta de novo; o aviso expõe falha persistente).
+	db.asyncStoreQuery(string.format([[
+		SELECT
+			SUM(p.item_id NOT IN (SELECT `itemtype` FROM `market_offers` WHERE `player_id` = %d AND `sale` = 1)) AS no_sell,
+			SUM(p.item_id NOT IN (SELECT `itemtype` FROM `market_offers` WHERE `player_id` = %d AND `sale` = 0)) AS no_buy
 		FROM `bot_market_item_prices` p
-		LEFT JOIN `tibia_market_items` t ON t.canary_item_id = p.item_id
 		WHERE p.marketable = 1 AND p.category IS NOT NULL AND p.category <> ''
-		AND p.item_id NOT IN (
-			SELECT `itemtype` FROM `market_offers` WHERE `player_id` = %d AND `sale` = 0
-		)
-	]], GOD_PLAYER_ID, MAX_STOCK, REF_PRICE, GOD_PLAYER_ID))
+	]], GOD_PLAYER_ID, GOD_PLAYER_ID), function(resultId)
+		if not resultId then return end
+		local noSell = Result.getNumber(resultId, "no_sell")
+		local noBuy = Result.getNumber(resultId, "no_buy")
+		Result.free(resultId)
+		if noSell > 0 or noBuy > 0 then
+			logger.warn(string.format("[BotMarketReplenish] coverage gap after refill: %d without SELL, %d without BUY", noSell, noBuy))
+		end
+	end)
 
 	return true
 end
 
-function botMarketReplenish.onStartup()
+-- Um GlobalEvent guarda UMA função e UM tipo: `onStartup` marca o tipo "startup" e
+-- sobrescreve o callback (ver revscriptsys.lua GlobalEventNewIndex). Por isso o top-up
+-- inicial é um evento separado; no mesmo objeto o onThink acima nunca chegava a rodar.
+botMarketReplenish:interval(REPLENISH_INTERVAL_MS)
+botMarketReplenish:register()
+
+local botMarketReplenishStartup = GlobalEvent("BotMarketReplenishStartup")
+
+function botMarketReplenishStartup.onStartup()
 	addEvent(function()
 		db.asyncQuery(string.format([[
-			UPDATE `market_offers` 
-			SET `amount` = %d, `created` = UNIX_TIMESTAMP() 
+			UPDATE `market_offers`
+			SET `amount` = %d, `created` = UNIX_TIMESTAMP()
 			WHERE `player_id` = %d AND `amount` < %d
 		]], MAX_STOCK, GOD_PLAYER_ID, MAX_STOCK))
 		logger.info("[BotMarketReplenish] Initial startup stock top-up completed (all offers set to 65535).")
@@ -82,5 +124,4 @@ function botMarketReplenish.onStartup()
 	return true
 end
 
-botMarketReplenish:interval(REPLENISH_INTERVAL_MS)
-botMarketReplenish:register()
+botMarketReplenishStartup:register()

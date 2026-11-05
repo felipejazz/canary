@@ -1,4 +1,4 @@
-local createItem = TalkAction("/i")
+local createItem = TalkAction("/i", "/item", "/give")
 
 function createItem.onSay(player, words, param)
 	-- create log

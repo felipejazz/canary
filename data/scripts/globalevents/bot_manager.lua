@@ -77,17 +77,6 @@ function botStartup.onStartup()
 		logger.info("[BotManager] Visual identity reroll complete.")
 	end
 
-	-- Restore saved XP Multiplier (SCHEDULE_EXP_RATE)
-	local expRes = db.storeQuery("SELECT `config_value` FROM `bot_startup_config` WHERE `config_key` = 'exp_multiplier'")
-	if expRes then
-		local val = tonumber(Result.getString(expRes, "config_value"))
-		Result.free(expRes)
-		if val and val > 0 then
-			SCHEDULE_EXP_RATE = math.floor(val * 100)
-			logger.info(string.format("[BotManager] Restored XP Multiplier to %.2fx (SCHEDULE_EXP_RATE=%d)", val, SCHEDULE_EXP_RATE))
-		end
-	end
-
 	-- Ensure staging tile exists for brand-new bots that have no prior loginPosition
 	Game.createTile(Position(31970, 32283, 7), true)
 
@@ -460,25 +449,6 @@ function botManager.onThink(interval)
 						resultText = string.format("Bot '%s' not found. Total BotPlayers in memory: %d", targetName, #allOnline)
 					end
 				end
-			elseif botName == "_global" and (low:match("^set_exp_multiplier%s+") or low:match("^exp_multiplier%s+")) then
-				local mult = tonumber(cmd:match("[%d%.]+")) or 1.0
-				local ratePct = math.floor(mult * 100)
-				SCHEDULE_EXP_RATE = ratePct
-				db.botAsyncQuery(string.format(
-					"INSERT INTO `bot_startup_config` (`config_key`, `config_value`) VALUES ('exp_multiplier', '%s') ON DUPLICATE KEY UPDATE `config_value` = '%s'",
-					tostring(mult), tostring(mult)))
-				resultText = string.format("XP Multiplier ajustado para %.2fx (SCHEDULE_EXP_RATE=%d)", mult, ratePct)
-				logger.info("[BotManager] " .. resultText)
-				pcall(function()
-					Game.broadcastMessage(string.format("[Servidor] Multiplicador de Experiencia alterado para %.2fx!", mult), MESSAGE_EVENT_ADVANCE)
-					-- Atualiza o mostrador visual de XP imediatamente no cliente (OTClient) de todos os jogadores online
-					for _, onlineP in ipairs(Game.getPlayers()) do
-						if onlineP and not onlineP:isRemoved() then
-							local newBaseRate = onlineP:getFinalBaseRateExperience() * 100
-							onlineP:setBaseXpGain(newBaseRate)
-						end
-					end
-				end)
 			elseif low:match("^apply_edit") then
 				local targetPlayer = Player(botName)
 				if targetPlayer then

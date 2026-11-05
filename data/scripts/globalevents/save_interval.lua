@@ -7,6 +7,7 @@ local function serverSave(interval)
 	end
 
 	saveServer()
+	SaveStatus.set({ nextSave = os.time() + SAVE_INTERVAL_CONFIG_TIME * SAVE_INTERVAL_TIME / 1000 })
 	local message = string.format(SAVE_INTERVAL_CONFIG_TIME > 1 and "Server save complete. Next save in %d %ss!" or "Server save complete. Next save in %d %s!", SAVE_INTERVAL_CONFIG_TIME, SAVE_INTERVAL_TYPE)
 	Game.broadcastMessage(message, MESSAGE_GAME_HIGHLIGHT)
 	logger.info(message)
@@ -41,6 +42,9 @@ function save.onTime(interval)
 end
 
 if SAVE_INTERVAL_TIME ~= 0 then
+	-- first warning fires one interval after boot/reload, the save itself 60s later
+	local intervalSec = SAVE_INTERVAL_CONFIG_TIME * SAVE_INTERVAL_TIME / 1000
+	SaveStatus.set({ saveIntervalSec = intervalSec, nextSave = os.time() + intervalSec + 60 })
 	save:interval(SAVE_INTERVAL_CONFIG_TIME * SAVE_INTERVAL_TIME)
 else
 	return logger.error(string.format("[save.onTime] - Save interval type '%s' is not valid, use 'second', 'minute' or 'hour'", SAVE_INTERVAL_TYPE))

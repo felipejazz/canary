@@ -38,6 +38,10 @@ local reloadTypes = {
 
 local reload = TalkAction("/reload")
 
+-- Any player may reload scripts; every other reload type stays restricted to the god group.
+local PLAYER_ALLOWED_RELOADS = { scripts = true, script = true }
+local GOD_GROUP_ID = 6
+
 function reload.onSay(player, words, param)
 	if not configManager.getBoolean(configKeys.ALLOW_RELOAD) then
 		player:sendTextMessage(MESSAGE_EVENT_ADVANCE, "Reload command is disabled.")
@@ -58,8 +62,16 @@ function reload.onSay(player, words, param)
 		return true
 	end
 
-	saveServer()
-	SaveHirelings()
+	local isGod = player:getGroup():getId() >= GOD_GROUP_ID
+	if not isGod and not PLAYER_ALLOWED_RELOADS[param:lower()] then
+		player:sendTextMessage(MESSAGE_EVENT_ADVANCE, "You can only use /reload scripts.")
+		return true
+	end
+
+	if isGod then
+		saveServer()
+		SaveHirelings()
+	end
 
 	Game.reload(reloadType)
 
@@ -68,5 +80,5 @@ function reload.onSay(player, words, param)
 end
 
 reload:separator(" ")
-reload:groupType("god")
+reload:groupType("normal")
 reload:register()

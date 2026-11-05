@@ -11,6 +11,10 @@ local function ServerSave()
 	end
 	if configManager.getBoolean(configKeys.GLOBAL_SERVER_SAVE_SHUTDOWN) then
 		Game.setGameState(GAME_STATE_SHUTDOWN)
+	else
+		-- No shutdown: save everything in place and keep the server (and players) online.
+		saveServer()
+		SaveStatus.set({ nextDailySave = SaveStatus.nextOccurrence({ configManager.getString(configKeys.GLOBAL_SERVER_SAVE_TIME) }) })
 	end
 
 	-- Reset raid daily counters
@@ -20,11 +24,19 @@ local function ServerSave()
 	end
 end
 
+local function savingMessage(remainingTime)
+	local minutes = remainingTime / 60000
+	if configManager.getBoolean(configKeys.GLOBAL_SERVER_SAVE_SHUTDOWN) then
+		return "Server is saving the game in " .. minutes .. " minute(s). Please logout."
+	end
+	return "Server is saving the game in " .. minutes .. " minute(s). You may lag for a few seconds; no restart."
+end
+
 local function ServerSaveWarning(time)
 	-- Calculate remaining time, minus one minute
 	local remainingTime = tonumber(time) - 60000
 	if configManager.getBoolean(configKeys.GLOBAL_SERVER_SAVE_NOTIFY_MESSAGE) then
-		local message = "Server is saving the game in " .. (remainingTime / 60000) .. " minute(s). Please logout."
+		local message = savingMessage(remainingTime)
 		Webhook.sendMessage("Server save", message, WEBHOOK_COLOR_WARNING)
 		Game.broadcastMessage(message, MESSAGE_GAME_HIGHLIGHT)
 	end
@@ -43,7 +55,7 @@ local globalServerSave = GlobalEvent("GlobalServerSave")
 function globalServerSave.onTime(interval)
 	local remainingTime = configManager.getNumber(configKeys.GLOBAL_SERVER_SAVE_NOTIFY_DURATION) * 60000
 	if configManager.getBoolean(configKeys.GLOBAL_SERVER_SAVE_NOTIFY_MESSAGE) then
-		local message = "Server is saving the game in " .. (remainingTime / 60000) .. " minute(s). Please logout."
+		local message = savingMessage(remainingTime)
 		Webhook.sendMessage("Server save", message, WEBHOOK_COLOR_WARNING)
 		Game.broadcastMessage(message, MESSAGE_GAME_HIGHLIGHT)
 	end
@@ -53,5 +65,6 @@ function globalServerSave.onTime(interval)
 	return not configManager.getBoolean(configKeys.GLOBAL_SERVER_SAVE_SHUTDOWN)
 end
 
+SaveStatus.set({ nextDailySave = SaveStatus.nextOccurrence({ configManager.getString(configKeys.GLOBAL_SERVER_SAVE_TIME) }) })
 globalServerSave:time(configManager.getString(configKeys.GLOBAL_SERVER_SAVE_TIME))
 globalServerSave:register()
